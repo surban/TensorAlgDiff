@@ -1,0 +1,59 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "taskName": "build",
+            "command": "dotnet build",
+            "type": "shell",
+            "group": "build",
+            "presentation": {
+                "reveal": "silent"
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "taskName": "test1",
+            "command": "dotnet run -- test1",
+            "type": "shell",
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "taskName": "test2",
+            "command": "dotnet run -- test2",
+            "type": "shell",
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "taskName": "test3",
+            "command": "dotnet run -- test3",
+            "type": "shell",
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "taskName": "test4",
+            "command": "dotnet run -- test4",
+            "type": "shell",
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "taskName": "testRectTransform",
+            "command": "dotnet run -- testRectTransform",
+            "type": "shell",
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "taskName": "test5",
+            "command": "dotnet run -- test5",
+            "type": "shell",
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "taskName": "testInequal",
+            "command": "dotnet run -- testInequal",
+            "type": "shell",
+            "problemMatcher": "$msCompile"
+        }                                                        
+    ]
+}

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>netcoreapp2.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DeepNet\Numeric\Tensor\Tensor.fsproj" />
+    <ProjectReference Include="..\PLplotNet\PLplotNet\PLplotNet.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="FourierMotzkin.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+</Project>
