@@ -349,6 +349,44 @@ type SumInfo = {
 type InputRange = int64 * int64
 
 
+let doSummation (si: SumInfo) (Y: Tensor<bigint>) =
+    // we want to perform a summation and for that we need to know the summation ranges
+    // to find the lower summation range what do we do?
+    let toRat = Tensor.convert<Rat>
+
+    // build constraint system
+    let A1 = si.XFreeToC1
+    let b1 = toRat si.CB1 - si.YToC1 .* toRat Y
+    let A2 = -si.XFreeToC2
+    let b2 = -toRat si.CB2 + si.YToC2 .* toRat Y
+    let A = Tensor.concat 0 [A1; A2]
+    let b = Tensor.concat 0 [b1; b2]
+
+    printfn "Constraint system: A .* xFree >= b"
+    printMat "A" A
+    printMat "b" b
+
+    match FourierMotzkin.solve A b with
+    | Some sol ->
+        let rec doSum sol xFree =
+            let j = FourierMotzkin.active sol
+            if j >= 0L then
+                let low, high = FourierMotzkin.range sol
+                let low = low |> ceil |> int
+                let high = high |> floor |> int
+                for i in low .. high do
+                    doSum (sol |> FourierMotzkin.subst (Rat i)) (i :: xFree)
+            else
+                let xFree = xFree |> HostTensor.ofList
+                let xDep = si.XFreeToXDep .* toRat xFree + si.YToXDep .* toRat Y
+                printfn "xFree=%A   xDep=%A" xFree xDep
+        doSum sol []
+    | None ->
+        printfn "Summation range is empty."
+
+    ()
+
+
 let test5() =
 
 
@@ -364,7 +402,9 @@ let test5() =
 
     // Y = M .* X
 
-    let XRanges = [(0L, 10L); (0L, 20L); (0L, 30L)]
+    let XRanges = [(0L, 10L); (0L, 20L); (0L, 50L)]
+    let Y = [6; 6; 6] |> HostTensor.ofList |> Tensor.convert<bigint>
+
 
 
     let M = M |> HostTensor.ofList2D |> Tensor.convert<bigint>
@@ -477,20 +517,13 @@ let test5() =
 
     printfn "SumInfo:\n%A" si
 
+    printMat "Y" Y
 
-        
-
-
-
-
-    ()
-
-
-let doSummation (si: SumInfo) =
-    // we want to perform a summation and for that we need to know the summation ranges
-    // to find the lower summation range what do we do?
+    doSummation si Y
         
     ()
+
+
 
 
 
