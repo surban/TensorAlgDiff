@@ -78,7 +78,7 @@ let compute (m: Tensor<bigint>) (rngs: Range list) =
     let I, S, N = LinAlg.integerInverse m
 
     // We need as many input dimensions as there are columns, the remaining dimensions will become dependants.
-    // By removing rows with minimum absolute value first, it is ensured that zero rows are always removed.
+    // By taking rows with minimum absolute value first, it is ensured that zero rows always becomes dependants.
     let deps = 
         N 
         |> abs 

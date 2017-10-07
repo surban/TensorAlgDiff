@@ -318,19 +318,62 @@ let testConsumers() =
 
 
 
-let testConsumers2() =
-    // How to do testing?
-    // Basically we must ensure that the summation hits all x points that hit a particular y point.
-    // So, we need to build a list of x points hitting the y point and check if it is correct.
-    // So, first we need to iterate over the x grid within its limits.
-    // Since it is rectangular, this is easy.
-    // What then about the y grid we are testing on?
-    // => For now only check y that have been hit.
-    // What to do if x hits a fractional y?
-    // => ignore it for now
-    // okay, easy to do
-    ()
+let verifyConsumers (m: Tensor<bigint>) (xRngs: Consumers.Range list) =
+    let n = List.length xRngs
 
+    // Build set for each y, which x hits it.
+    let yHitters = System.Collections.Generic.Dictionary()
+    let rec doIter rngs x =
+        match rngs with
+        | (low, high) :: rRngs ->
+            for i in low .. high do
+                doIter rRngs (x @ [i])
+        | [] ->
+            let xi = x |> HostTensor.ofList |> Tensor.convert<bigint>
+            let y = m .* xi |> Tensor.convert<int> |> HostTensor.toList
+            if not (yHitters.ContainsKey y) then
+                yHitters.[y] <- System.Collections.Generic.HashSet (Seq.singleton x)
+            else
+                yHitters.[y].Add x |> ignore
+    doIter xRngs []
+
+    // Build consumer info.
+    let ci = Consumers.compute m xRngs
+
+    // compare
+    for KeyValue(y, xs) in yHitters do
+        let xs = Set.ofSeq xs
+        let xsComp = Consumers.get ci (y |> HostTensor.ofList |> Tensor.convert<bigint>) |> Set.ofSeq
+
+        printfn "For y=%A:" y
+        printfn "Really hitting x:   %A" (xs |> Set.toList)
+        printfn "Computed hitting x: %A" (xsComp |> Set.toList)
+
+        if xs = xsComp then
+            printfn "Match!"
+        else
+            printfn "===== Mismatch!!! ====="
+
+        printfn ""
+
+
+
+let testConsumers2() =
+    let xRngs = [(0L, 10L); (0L, 20L); (0L, 50L)]
+
+    // let M = [[2; 1; 3];
+    //          [1; 2; 3];
+    //          [3; 3; 6]]
+    // let M = [[1; 2; 3];
+    //         [2; 4; 6];
+    //         [3; 1; 6]]      
+    let M = [[1; 2; 3];
+             [1; 2; 3];
+             [1; 2; 3]]     
+
+    let M = M |> HostTensor.ofList2D |> Tensor.convert<bigint>
+
+    verifyConsumers M xRngs
 
 
 
