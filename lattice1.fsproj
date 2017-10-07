@@ -9,6 +9,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="FourierMotzkin.fs" />
+    <Compile Include="Consumers.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 </Project>

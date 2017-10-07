@@ -44,11 +44,17 @@
             "problemMatcher": "$msCompile"
         },
         {
-            "taskName": "test5",
-            "command": "dotnet run -- test5",
+            "taskName": "testConsumers",
+            "command": "dotnet run -- testConsumers",
             "type": "shell",
             "problemMatcher": "$msCompile"
         },
+        {
+            "taskName": "testConsumers2",
+            "command": "dotnet run -- testConsumers2",
+            "type": "shell",
+            "problemMatcher": "$msCompile"
+        },        
         {
             "taskName": "testInequal",
             "command": "dotnet run -- testInequal",
