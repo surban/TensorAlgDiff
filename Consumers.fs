@@ -75,14 +75,15 @@ let get (ci: ConsumerInfo) (y: Tensor<bigint>) =
     let toRat = Tensor.convert<Rat>
     let toInt = Tensor.convert<int>
 
-    // Check solvability constraints.
+    // Base solution.
     let s = ci.Solvability .* y
-    if Tensor.all (s ==== bigint.Zero) then
-        // System solvable, compute solution.
+    let xBase = ci.YToX .* (toRat y)
 
-        // Base solution.
-        let y = toRat y
-        let xBase = ci.YToX .* y |> Tensor.convert<bigint>
+    // System is solvable, if solvability product is zero and base solution is integer.
+    if Tensor.all (s ==== bigint.Zero) && Tensor.all (xBase |> Tensor.map (fun r -> r.IsInt)) then
+        // System solvable, compute solution.
+        let xBase = Tensor.convert<bigint> xBase
+        let y = toRat y        
 
         // Build biases of constraint system.
         let lows, highs = List.unzip ci.Ranges

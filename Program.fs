@@ -367,6 +367,7 @@ let verifyConsumers (m: Tensor<bigint>) (xRngs: Consumers.Range list) =
 
     // Build consumer info.
     let ci = Consumers.compute m xRngs
+    //printfn "ci:\n%A" ci
 
     // compare
     for KeyValue(y, xs) in yHitters do
