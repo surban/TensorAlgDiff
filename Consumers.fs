@@ -77,6 +77,8 @@ let compute (m: Tensor<bigint>) (rngs: Range list) =
     /// Invert matrix M over integers, giving inverse I, solvability S and nullspace N.
     let I, S, N = LinAlg.integerInverse m
 
+    printfn "Inversion of M=\n%A\n gives inverse I=\n%A\n and nullspace N=\n%A" m I N
+
     // We need as many input dimensions as there are columns, the remaining dimensions will become dependants.
     // By taking rows with minimum absolute value first, it is ensured that zero rows always becomes dependants.
     let deps = 
@@ -102,6 +104,7 @@ let compute (m: Tensor<bigint>) (rngs: Range list) =
             | Some fd, None -> Free fd
             | None, Some dd -> Dependant dd
             | _ -> failwith "dimension cannot be both free and dependant")
+    printfn "Faith of dimensions:\n%A" dimFaith
 
     // Split inverse and nullspace into dependant and free partitions.
     let getRows rowList (V: Tensor<_>) =
@@ -119,7 +122,8 @@ let compute (m: Tensor<bigint>) (rngs: Range list) =
     // This is done by solving the free for the basis factors and then inserting into the dependants.
     let NFI, _, _ = LinAlg.integerInverse NF
     let NDF = Tensor.convert<Rat> ND .* NFI
-    //printMat "Dependants given Free NDF" NDF
+    printfn "Nullspace basis factors in terms of free coordinates NFI=\n%A" NFI
+    printfn "Nullspace in terms of free coordinates NDF=\n%A" NDF
 
     // Compute LCM of inverse of free nullspace, since all free coordinates must be divisable by it.
     let FD = NFI |> Tensor.foldAxis (fun l v -> lcm l v.Dnm) (HostTensor.scalar bigint.One) 0
@@ -167,7 +171,7 @@ let get (ci: ConsumerInfo) (y: Tensor<bigint>) =
     let b1 = toRat ci.CB1 - ci.YToC1 .* toRat y
     let b2 = -toRat ci.CB2 + ci.YToC2 .* toRat y
     let b = Tensor.concat 0 [b1; b2]
-    //printMat "b" b
+    printfn "b=\n%A" b
 
     match FourierMotzkin.solve ci.CPresolution b with
     | Some sol ->
@@ -180,19 +184,19 @@ let get (ci: ConsumerInfo) (y: Tensor<bigint>) =
                 
                 let incr, rem = freeDiv.[[j]], freeRem.[[j]]
                 let rem = rem %% incr
-                //printfn "x_%d:  increment=%d   remainder=%d" j incr rem
+                printfn "x_%d:  increment=%d   remainder=%d" j incr rem
 
-                //printfn "low before adjustment: %d" low
+                printfn "low before adjustment: %d" low
                 let lowDiff = rem - (low %% incr)
                 let lowDiff = if lowDiff < 0 then lowDiff + incr else lowDiff
                 let low = low + lowDiff
-                //printfn "low after adjustment: %d" low
+                printfn "low after adjustment: %d" low
 
-                //printfn "high before adjustment: %d" high
+                printfn "high before adjustment: %d" high
                 let highDiff = rem - (high %% incr)
                 let highDiff = if highDiff > 0 then highDiff - incr else highDiff
                 let high = high + highDiff
-                //printfn "high after adjustment: %d" high
+                printfn "high after adjustment: %d" high
 
                 for i in low .. incr .. high do
                     yield! (doSum (sol |> FourierMotzkin.subst (Rat i)) (i :: xFree))

@@ -319,6 +319,10 @@ let testConsumers() =
 
 
 let verifyConsumers (m: Tensor<bigint>) (xRngs: Consumers.Range list) =
+    
+    printMat "M" m
+    printfn "x ranges: %A" xRngs
+
     let n = List.length xRngs
 
     // Build set for each y, which x hits it.
@@ -353,6 +357,7 @@ let verifyConsumers (m: Tensor<bigint>) (xRngs: Consumers.Range list) =
             printfn "Match!"
         else
             printfn "===== Mismatch!!! ====="
+            exit 1
 
         printfn ""
 
