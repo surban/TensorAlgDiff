@@ -383,7 +383,7 @@ let doSummation (si: SumInfo) (Y: Tensor<bigint>) =
 
 
 
-    match FourierMotzkin.solve A b with
+    match FourierMotzkin.solve (FourierMotzkin.presolve A) b with
     | Some sol ->
         let rec doSum sol xFree =
             let j = FourierMotzkin.active sol
@@ -427,7 +427,7 @@ let test5() =
     // let M = [[2; 1; 3];
     //          [1; 2; 3];
     //          [3; 3; 6]]
-    //let M = [[1; 2; 3];
+    // let M = [[1; 2; 3];
     //         [2; 4; 6];
     //         [3; 1; 6]]      
     let M = [[1; 2; 3];
@@ -564,7 +564,7 @@ let test5() =
     // they only come into play for the feasibilility check and backpropagation
 
     // TODO:
-    // 1. implement modulo checking for sumation stepping
+    // 1. implement modulo checking for sumation stepping => DONE
     // 2. implement better bias handling
     // 3. implement testing: will need to think about how this is done
     // 4. implement expression differentiation system
@@ -594,7 +594,7 @@ let testInequal () =
     printMat "A" A
     printMat "b" b
 
-    let sol = FourierMotzkin.solve A b  
+    let sol = FourierMotzkin.solve (FourierMotzkin.presolve A) b  
     match sol with
     | Some sol ->        
         printfn "Solution exists:"
