@@ -341,6 +341,30 @@ let verifyConsumers (m: Tensor<bigint>) (xRngs: Consumers.Range list) =
                 yHitters.[y].Add x |> ignore
     doIter xRngs []
 
+    // Calculate the range for each dimension of y.
+    let ys =
+        yHitters.Keys
+        |> Seq.map (HostTensor.ofList)
+        |> Seq.map (fun y -> y.[NewAxis, *])
+        |> Tensor.concat 0
+    let yLow = Tensor.minAxis 0 ys
+    let yHigh = Tensor.maxAxis 0 ys
+    //printfn "yLow:  %A" yLow
+    //printfn "yHigh: %A" yHigh
+
+    // Add unhit ys within range for checking.
+    let mutable maxUnhit = 100
+    let rec addUnhit d y =
+        if d >= 0L then
+            for i in yLow.[[d]] .. yHigh.[[d]] do
+                addUnhit (d-1L) (i::y)
+        else
+            if not (yHitters.ContainsKey y) && maxUnhit > 0 then
+                //printfn "adding unhit y=%A" y
+                yHitters.[y] <- System.Collections.Generic.HashSet()
+                maxUnhit <- maxUnhit - 1
+    addUnhit (yLow.NElems - 1L) []
+
     // Build consumer info.
     let ci = Consumers.compute m xRngs
 
@@ -348,37 +372,44 @@ let verifyConsumers (m: Tensor<bigint>) (xRngs: Consumers.Range list) =
     for KeyValue(y, xs) in yHitters do
         let xs = Set.ofSeq xs
         let xsComp = Consumers.get ci (y |> HostTensor.ofList |> Tensor.convert<bigint>) |> Set.ofSeq
-
-        printfn "For y=%A:" y
-        printfn "Really hitting x:   %A" (xs |> Set.toList)
-        printfn "Computed hitting x: %A" (xsComp |> Set.toList)
-
         if xs = xsComp then
-            printfn "Match!"
+            //printfn "For y=%A:" y
+            //printfn "Really hitting x:   %A" (xs |> Set.toList)
+            //printfn "Computed hitting x: %A" (xsComp |> Set.toList)        
+            //printfn "Match!"
+            //printfn ""
+            ()
         else
+            printfn "For y=%A:" y
+            printfn "Really hitting x:   %A" (xs |> Set.toList)
+            printfn "Computed hitting x: %A" (xsComp |> Set.toList)        
             printfn "===== Mismatch!!! ====="
             exit 1
-
-        printfn ""
-
+    printfn "verifyConsumers okay!"
 
 
 let testConsumers2() =
-    let xRngs = [(0L, 10L); (0L, 20L); (0L, 50L)]
+    let doVerify m xRngs =
+        verifyConsumers (m |> HostTensor.ofList2D |> Tensor.convert<bigint>) xRngs     
 
-    // let M = [[2; 1; 3];
-    //          [1; 2; 3];
-    //          [3; 3; 6]]
-    // let M = [[1; 2; 3];
-    //         [2; 4; 6];
-    //         [3; 1; 6]]      
+    let xRngs = [(0L, 10L); (0L, 20L); (0L, 50L)]
     let M = [[1; 2; 3];
              [1; 2; 3];
              [1; 2; 3]]     
+    doVerify M xRngs
 
-    let M = M |> HostTensor.ofList2D |> Tensor.convert<bigint>
+    let xRngs = [(0L, 10L); (0L, 20L); (0L, 50L)]
+    let M = [[1; 2; 3];
+             [2; 4; 6];
+             [3; 1; 6]]      
+    doVerify M xRngs
 
-    verifyConsumers M xRngs
+    let xRngs = [(0L, 10L); (0L, 20L); (0L, 50L)]
+    let M = [[2; 1; 3];
+             [1; 2; 3];
+             [5; 3; 6]]
+    doVerify M xRngs
+
 
 
 

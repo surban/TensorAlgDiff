@@ -51,7 +51,7 @@ let compute (m: Tensor<bigint>) (rngs: Range list) =
 
     /// Invert matrix M over integers, giving inverse I, solvability S and nullspace N.
     let I, S, N = LinAlg.integerInverse m
-    printfn "Inversion of M=\n%A\n gives inverse I=\n%A\n and nullspace N=\n%A" m I N
+    //printfn "Inversion of M=\n%A\n gives inverse I=\n%A\n and nullspace N=\n%A" m I N
 
     // Constraints are:
     // x_i = YToX_i* .* y + Nullspace_i* .* z >= low_i
@@ -75,35 +75,43 @@ let get (ci: ConsumerInfo) (y: Tensor<bigint>) =
     let toRat = Tensor.convert<Rat>
     let toInt = Tensor.convert<int>
 
-    // Base solution.
-    let y = toRat y
-    let xBase = ci.YToX .* y |> Tensor.convert<bigint>
+    // Check solvability constraints.
+    let s = ci.Solvability .* y
+    if Tensor.all (s ==== bigint.Zero) then
+        // System solvable, compute solution.
 
-    // Build biases of constraint system.
-    let lows, highs = List.unzip ci.Ranges
-    let lows, highs = HostTensor.ofList lows, HostTensor.ofList highs
-    let cRight1 =  toRat lows  - ci.YToX .* y
-    let cRight2 = -toRat highs + ci.YToX .* y
-    let cRight = Tensor.concat 0 [cRight1; cRight2]
-    //printfn "cRight=\n%A" cRight
+        // Base solution.
+        let y = toRat y
+        let xBase = ci.YToX .* y |> Tensor.convert<bigint>
 
-    match FourierMotzkin.solve ci.ConstraintsLeft cRight with
-    | Some sol ->
-        let rec doIter sol z = seq {
-            let j = FourierMotzkin.active sol
-            if j >= 0L then
-                let zjLow, zjHigh = FourierMotzkin.range sol
-                let zjLow = zjLow |> ceil |> int
-                let zjHigh = zjHigh |> floor |> int                
-                for zj in zjLow .. zjHigh do
-                    yield! (doIter (sol |> FourierMotzkin.subst (Rat zj)) (zj :: z))
-            else
-                let z = z |> HostTensor.ofList |> Tensor.convert<bigint>
-                let x = xBase + ci.Nullspace .* z |> Tensor.convert<int64>
-                yield (HostTensor.toList x)
-        }
-        doIter sol []
-    | None -> Seq.empty
+        // Build biases of constraint system.
+        let lows, highs = List.unzip ci.Ranges
+        let lows, highs = HostTensor.ofList lows, HostTensor.ofList highs
+        let cRight1 =  toRat lows  - ci.YToX .* y
+        let cRight2 = -toRat highs + ci.YToX .* y
+        let cRight = Tensor.concat 0 [cRight1; cRight2]
+        //printfn "cRight=\n%A" cRight
+
+        match FourierMotzkin.solve ci.ConstraintsLeft cRight with
+        | Some sol ->
+            let rec doIter sol z = seq {
+                let j = FourierMotzkin.active sol
+                if j >= 0L then
+                    let zjLow, zjHigh = FourierMotzkin.range sol
+                    let zjLow = zjLow |> ceil |> int
+                    let zjHigh = zjHigh |> floor |> int                
+                    for zj in zjLow .. zjHigh do
+                        yield! (doIter (sol |> FourierMotzkin.subst (Rat zj)) (zj :: z))
+                else
+                    let z = z |> HostTensor.ofList |> Tensor.convert<bigint>
+                    let x = xBase + ci.Nullspace .* z |> Tensor.convert<int64>
+                    yield (HostTensor.toList x)
+            }
+            doIter sol []
+        | None -> Seq.empty
+    else
+        // System not solvable.
+        Seq.empty
 
 
 
