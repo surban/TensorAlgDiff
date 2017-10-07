@@ -336,10 +336,10 @@ type SumInfo = {
     CB2:                Tensor<int64>     
 
     // Divisibility constraints are of the form:
-    // XFree = YToR .* Y (mod RDiv)
+    // XFree = YToRem .* Y (mod RDiv)
 
     /// Matrix mapping from input coordinates to division remainders
-    YToRDiv:            Tensor<Rat>
+    YToRem:            Tensor<Rat>
 
     /// Dividers
     RDiv:               Tensor<bigint>       
@@ -349,10 +349,18 @@ type SumInfo = {
 type InputRange = int64 * int64
 
 
+/// Modulo operator returning always non-negative values.
+let inline (%%) (x: ^T) (d: ^T) : ^T =
+    let r = x % d
+    if r < LanguagePrimitives.GenericZero then d + r
+    else r
+
+
 let doSummation (si: SumInfo) (Y: Tensor<bigint>) =
     // we want to perform a summation and for that we need to know the summation ranges
     // to find the lower summation range what do we do?
     let toRat = Tensor.convert<Rat>
+    let toInt = Tensor.convert<int>
 
     // build constraint system
     let A1 = si.XFreeToC1
@@ -366,6 +374,15 @@ let doSummation (si: SumInfo) (Y: Tensor<bigint>) =
     printMat "A" A
     printMat "b" b
 
+
+    let freeDiv = si.RDiv |> toInt
+    let freeRem = si.YToRem .* toRat Y |> toInt
+    // ensure that remainders are positive
+    //let negRem = freeRem <<<< 0
+    //freeRem.M(negRem) <- freeRem.M(negRem) + freeDiv
+
+
+
     match FourierMotzkin.solve A b with
     | Some sol ->
         let rec doSum sol xFree =
@@ -374,7 +391,24 @@ let doSummation (si: SumInfo) (Y: Tensor<bigint>) =
                 let low, high = FourierMotzkin.range sol
                 let low = low |> ceil |> int
                 let high = high |> floor |> int
-                for i in low .. high do
+                
+                let incr, rem = freeDiv.[[j]], freeRem.[[j]]
+                let rem = rem %% incr
+                printfn "x_%d:  increment=%d   remainder=%d" j incr rem
+
+                printfn "low before adjustment: %d" low
+                let lowDiff = rem - (low %% incr)
+                let lowDiff = if lowDiff < 0 then lowDiff + incr else lowDiff
+                let low = low + lowDiff
+                printfn "low after adjustment: %d" low
+
+                printfn "high before adjustment: %d" high
+                let highDiff = rem - (high %% incr)
+                let highDiff = if highDiff > 0 then highDiff - incr else highDiff
+                let high = high + highDiff
+                printfn "high after adjustment: %d" high
+
+                for i in low .. incr .. high do
                     doSum (sol |> FourierMotzkin.subst (Rat i)) (i :: xFree)
             else
                 let xFree = xFree |> HostTensor.ofList
@@ -403,7 +437,7 @@ let test5() =
     // Y = M .* X
 
     let XRanges = [(0L, 10L); (0L, 20L); (0L, 50L)]
-    let Y = [6; 6; 6] |> HostTensor.ofList |> Tensor.convert<bigint>
+    let Y = [20; 6; 6] |> HostTensor.ofList |> Tensor.convert<bigint>
 
 
 
@@ -466,11 +500,11 @@ let test5() =
     // okay how to determine modulos?
     // dependants must be whole numbers so compute the LCM of all rows
 
-    // computing LCM of NDF
+    // computing LCM of NFI
     // Each free coordinate must be divisable by it.
     let FD =
-        NDF
-        |> Tensor.foldAxis (fun l v -> lcm l v.Dnm) (HostTensor.scalar bigint.One) 1
+        NFI
+        |> Tensor.foldAxis (fun l v -> lcm l v.Dnm) (HostTensor.scalar bigint.One) 0
 
     printMat "Free divisibiltiy requirements FD" FD
 
@@ -510,7 +544,7 @@ let test5() =
         XFreeToC2   = XFreeConstr
         YToC2       = YConstr
         CB2         = xHigh
-        YToRDiv     = ID
+        YToRem      = IF
         RDiv        = FD
     }
     
@@ -520,7 +554,21 @@ let test5() =
     printMat "Y" Y
 
     doSummation si Y
-        
+
+    // okay, so we performed a summation
+    // what's next to do?
+    // the logical next step is to include the modulo constraints in the sum
+    // after that it must be tested if all is working as should
+    // also the handling of Y can be optimized
+    // i.e. we can do the inversion without actually knowing the bias values
+    // they only come into play for the feasibilility check and backpropagation
+
+    // TODO:
+    // 1. implement modulo checking for sumation stepping
+    // 2. implement better bias handling
+    // 3. implement testing: will need to think about how this is done
+    // 4. implement expression differentiation system
+
     ()
 
 

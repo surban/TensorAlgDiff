@@ -37,9 +37,9 @@ let solve (A: Tensor<Rat>) (b: Tensor<Rat>) =
             let nzRows = ~~~~zRows
 
             // Divide rows so that x_k = +1 or x_k = -1 or x_k = 0 in each inequality.     
-            let facs = abs (rA.Masked(nzRows, NoMask).[*, k]) 
-            rA.Masked(nzRows, NoMask) <- rA.Masked(nzRows, NoMask) / facs.[*, NewAxis]
-            rb.Masked(nzRows) <- rb.Masked(nzRows) / facs
+            let facs = abs (rA.M(nzRows, NoMask).[*, k]) 
+            rA.M(nzRows, NoMask) <- rA.M(nzRows, NoMask) / facs.[*, NewAxis]
+            rb.M(nzRows) <- rb.M(nzRows) / facs
 
             //printfn "after division:"
             //printfn "rA=\n%A" rA
@@ -53,13 +53,13 @@ let solve (A: Tensor<Rat>) (b: Tensor<Rat>) =
             elif Tensor.all (rA.[*, k] ==== Rat.One) || Tensor.all (rA.[*, k] ==== Rat.MinusOne) then
                 // the coefficients of x_k are all +1 or -1
                 //printfn "all x_k=+1 or all x_k=-1"
-                eliminate (rA.Masked(zRows, NoMask)) (rb.Masked(zRows)) 
+                eliminate (rA.M(zRows, NoMask)) (rb.M(zRows)) 
                           (rA::rAs) (rb::rbs) (arb |> Set.union (Set [k+1L .. n-1L]))
             elif Tensor.all ((rA.[*,k] ==== Rat.Zero) |||| (rA.[*,k] ==== Rat.One)) ||
                  Tensor.all ((rA.[*,k] ==== Rat.Zero) |||| (rA.[*,k] ==== Rat.MinusOne)) then
                 // the coefficients of x_k are a mix of 0 and +1 or a mix of 0 and -1
                 //printfn "x_k is mix of 0 and +1 or mix of 0 and -1"
-                eliminate (rA.Masked(zRows, NoMask)) (rb.Masked(zRows)) (rA::rAs) (rb::rbs) arb
+                eliminate (rA.M(zRows, NoMask)) (rb.M(zRows)) (rA::rAs) (rb::rbs) arb
             else
                 //printfn "x_k has +1 and -1"
                 // there is at least one pair of inequalities with a +1 and a -1 coefficient for x_k
@@ -69,12 +69,12 @@ let solve (A: Tensor<Rat>) (b: Tensor<Rat>) =
                 let nextRA = 
                     List.allPairs pRows nRows            
                     |> List.map (fun (p, n) -> rA.[p..p, *] + rA.[n..n, *])
-                    |> List.append [rA.Masked(zRows, NoMask)]
+                    |> List.append [rA.M(zRows, NoMask)]
                     |> Tensor.concat 0
                 let nextRb = 
                     List.allPairs pRows nRows            
                     |> List.map (fun (p, n) -> rb.[p..p] + rb.[n..n])
-                    |> List.append [rb.Masked(zRows)]
+                    |> List.append [rb.M(zRows)]
                     |> Tensor.concat 0      
                 eliminate nextRA nextRb (rA::rAs) (rb::rbs) arb
         else
@@ -118,8 +118,8 @@ let range (sol: Solution) =
         //printfn "s=\n%A" s
         // if coefficient of x_j is +1, then line of s is lower limit for x_j
         // if coefficient of x_j is -1, then line of -s is upper limit for x_j
-        let low = s.Masked(A.[*,j] ==== Rat.One) |> Tensor.max
-        let high = -s.Masked(A.[*,j] ==== Rat.MinusOne) |> Tensor.min
+        let low = s.M(A.[*,j] ==== Rat.One) |> Tensor.max
+        let high = -s.M(A.[*,j] ==== Rat.MinusOne) |> Tensor.min
         low, high
 
 
