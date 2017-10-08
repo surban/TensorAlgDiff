@@ -356,7 +356,7 @@ let verifyConsumers (m: Tensor<bigint>) (xRngs: Consumers.Range list) =
     let mutable maxUnhit = 100
     let rec addUnhit d y =
         if d >= 0L then
-            for i in yLow.[[d]] .. yHigh.[[d]] do
+            for i in (yLow.[[d]] - 5) .. (yHigh.[[d]] + 5) do
                 addUnhit (d-1L) (i::y)
         else
             if not (yHitters.ContainsKey y) && maxUnhit > 0 then
@@ -393,26 +393,55 @@ let testConsumers2() =
     let doVerify m xRngs =
         verifyConsumers (m |> HostTensor.ofList2D |> Tensor.convert<bigint>) xRngs     
 
-    let xRngs = [(0L, 10L); (0L, 20L); (0L, 50L)]
     let M = [[1; 2; 3];
              [1; 2; 3];
              [1; 2; 3]]     
-    doVerify M xRngs
+    let t1 = async { doVerify M [(0L, 10L); (0L, 20L); (0L, 50L)] }
 
-    let xRngs = [(0L, 10L); (0L, 20L); (0L, 50L)]
     let M = [[1; 2; 3];
              [2; 4; 6];
              [3; 1; 6]]      
-    doVerify M xRngs
+    let t2 = async { doVerify M [(0L, 10L); (0L, 20L); (0L, 50L)] }
 
-    let xRngs = [(0L, 10L); (0L, 20L); (0L, 50L)]
     let M = [[2; 1; 3];
              [1; 2; 3];
              [5; 3; 6]]
-    doVerify M xRngs
+    let t3 = async { doVerify M [(0L, 10L); (0L, 20L); (0L, 50L)] }
 
+    let M = [[1]]
+    let t4 = async { doVerify M [(0L, 10L);] }
 
+    let M = [[-5]]
+    let t5 = async { doVerify M [(0L, 15L);] }
 
+    let M = [[0]]
+    let t6 = async { doVerify M [(0L, 15L);] }
+
+    let M = [[2];
+             [3]]
+    let t7 = async { doVerify M [(0L, 15L);] }
+
+    let M = [[2; 5];
+             [3; 4]]
+    let t8 = async { doVerify M [(0L, 15L); (0L, 12L);] }
+
+    let M = [[0; 0; 1];
+             [1; 0; 0];
+             [0; 1; 0]]
+    let t9 = async { doVerify M [(0L, 10L); (0L, 5L); (0L, 7L)] }
+
+    let M = [[0; 0; 0];
+             [0; 0; 0];
+             [0; 0; 0]]
+    let t10 = async { doVerify M [(0L, 10L); (0L, 5L); (0L, 7L)] }
+
+    let M = [[1; 2; 4; 2];
+             [2; 4; 1; 3];
+             [3; 6; 2; 4];
+             [4; 8; 3; 4]]
+    let t11 = async { doVerify M [(0L, 10L); (0L, 5L); (0L, 7L); (0L, 8L)] }
+
+    Async.Parallel [t1; t2; t3; t4; t5; t6; t7; t8; t9; t10; t11] |> Async.RunSynchronously |> ignore
 
 
 let testInequal () =
