@@ -441,7 +441,13 @@ let testConsumers2() =
              [4; 8; 3; 4]]
     let t11 = async { doVerify M [(0L, 10L); (0L, 5L); (0L, 7L); (0L, 8L)] }
 
-    Async.Parallel [t1; t2; t3; t4; t5; t6; t7; t8; t9; t10; t11] |> Async.RunSynchronously |> ignore
+    let M = [[0; 0; 0; 0];
+             [0; 0; 0; 0];
+             [0; 0; 0; 0];
+             [4; 7; 3; 5]]
+    let t12 = async { doVerify M [(0L, 10L); (0L, 5L); (0L, 7L); (0L, 8L)] }    
+
+    Async.Parallel [t1; t2; t3; t4; t5; t6; t7; t8; t9; t10; t11; t12] |> Async.RunSynchronously |> ignore
 
 
 let testInequal () =
