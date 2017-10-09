@@ -20,6 +20,7 @@ let main argv =
     | [|"testConsumers"|] -> testConsumers()
     | [|"testConsumers2"|] -> testConsumers2()
     | [|"testInequal"|] -> testInequal()
+    | [|"testElements1"|] -> testElements1()
     | _ -> failwith "unknown"
     0
 

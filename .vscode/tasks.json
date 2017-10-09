@@ -60,6 +60,12 @@
             "command": "dotnet run -- testInequal",
             "type": "shell",
             "problemMatcher": "$msCompile"
-        }                                                        
+        },
+        {
+            "taskName": "testElements1",
+            "command": "dotnet run -- testElements1",
+            "type": "shell",
+            "problemMatcher": "$msCompile"
+        }                                                                
     ]
 }

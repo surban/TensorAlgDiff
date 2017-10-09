@@ -6,7 +6,7 @@ open System.Numerics
 open PLplot
 open Tensor
 open Tensor.Algorithms
-
+open Elements
 
 
 let printMat title mat =
@@ -287,6 +287,15 @@ let testRectTransform() =
     ()
 
 
+let testElements1() =
+    let i = Elements.idx "i"
+    let j = Elements.idx "j"
+    let k = Elements.idx "k"
 
+    let expr = Elements.arg "x" [i; j] + 2.0 * Elements.arg "y" [j; j]
+    let func = Elements.func [i, 10L; j, 20L; k, 30L] expr
 
+    printfn "Function:\n%A" func
+
+    
 
