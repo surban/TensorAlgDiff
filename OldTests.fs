@@ -292,10 +292,10 @@ let testElements1() =
     let j = Elements.idx "j"
     let k = Elements.idx "k"
 
-    let expr = Elements.arg "x" [i; j] + 2.0 * Elements.arg "y" [j; j]
+    let expr = Elements.arg "x" [i; j] + 2.0 * (Elements.arg "y" [j; j] + Elements.arg "z" [k])
     let func = Elements.func [i, 10L; j, 20L; k, 30L] expr
 
     printfn "Function:\n%A" func
 
-    
+
 

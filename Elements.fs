@@ -33,13 +33,16 @@ module Elements =
                 |> List.map fst
                 |> List.sort
                 |> List.choose (fun n -> 
-                    if f.[n] <> 0L then Some (sprintf "%d*%s" f.[n] n)
-                    else None)
+                    if f.[n] = 0L then None
+                    elif f.[n] = 1L  then Some n
+                    elif f.[n] = -1L then Some ("-" + n)
+                    else Some (sprintf "%d*%s" f.[n] n))
                 |> String.concat " + "
             static member name (IdxExpr f) =
                 f |> Map.toList |> List.exactlyOne |> fst
 
     /// Index expressions for all indicies of a tensor.
+    [<StructuredFormatDisplay("{Pretty}")>]    
     type IdxExprs =
         IdxExprs of IdxExpr list
         with
@@ -52,7 +55,10 @@ module Elements =
                         match inNames |> List.tryFindIndex ((=) name) with
                         | Some c -> m.[[int64 r; int64 c]] <- v
                         | None -> failwithf "dimension %s does not exist" name))
-                m                
+                m          
+            member this.Pretty =
+                let (IdxExprs idx) = this
+                sprintf "%A" idx
 
     type LeafOp =
         | Const of float
@@ -98,7 +104,7 @@ module Elements =
                 let dims =
                     this.Shape
                     |> List.map fst
-                    |> String.concat ", "
+                    |> String.concat "; "
                 sprintf "f[%s] = %A" dims this.Expr
 
     let func dims expr =
@@ -152,7 +158,7 @@ module Elements =
                 let myPri = 20
                 let myStr =
                     match op with
-                    | Const v -> sprintf "%f" v
+                    | Const v -> sprintf "%g" v
                     | IdxValue idx -> sprintf "(%A)" idx
                     | Argument (name, idxs) -> sprintf "%s%A" name idxs
                 myStr, myPri
