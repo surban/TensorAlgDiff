@@ -300,17 +300,17 @@ let testElements1() =
     let dimSizes = Map [i.Name, iSize; j.Name, jSize; k.Name, kSize]    
     let argShapes = Map ["x", xv.Shape; "y", yv.Shape; "z", zv.Shape]
 
-    let expr = Elements.arg "x" [i; j] + 2.0 * (Elements.arg "y" [j; j] * Elements.arg "z" [k])
+    let expr = Elements.arg "x" [i; j] + 2.0 * (Elements.arg "y" [j; j] * (Elements.arg "z" [k])**3.0)
     let func = Elements.func "f" dimNames dimSizes argShapes expr
 
     printfn "Function:\n%A" func
     let argEnv = Map ["x", xv; "y", yv; "z", zv]
     let fv = Elements.evalFunc argEnv func
 
-    printfn "x=\n%A" xv
-    printfn "y=\n%A" yv
-    printfn "z=\n%A" zv
-    printfn "f=\n%A" fv
+    //printfn "x=\n%A" xv
+    //printfn "y=\n%A" yv
+    //printfn "z=\n%A" zv
+    //printfn "f=\n%A" fv
     
     // derivative expression
     let dfExpr = Elements.derivExpr func.Expr (Elements.arg "dIn" [])

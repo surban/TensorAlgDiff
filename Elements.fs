@@ -33,15 +33,16 @@ module Elements =
                 af |> Map.map (fun ai av -> av / f) |> IdxExpr
             member this.Pretty =
                 let (IdxExpr f) = this
-                Map.toList f
-                |> List.map fst
-                |> List.sort
-                |> List.choose (fun n -> 
-                    if f.[n] = Rat.Zero then None
-                    elif f.[n] = Rat.One then Some n
-                    elif f.[n] = Rat.MinusOne then Some ("-" + n)
-                    else Some (sprintf "%A*%s" f.[n] n))
-                |> String.concat " + "
+                let sf =
+                    Map.toList f
+                    |> List.map fst
+                    |> List.sort
+                    |> List.choose (fun n -> 
+                        if f.[n] = Rat.Zero then None
+                        elif f.[n] = Rat.One then Some n
+                        elif f.[n] = Rat.MinusOne then Some ("-" + n)
+                        else Some (sprintf "%A*%s" f.[n] n))
+                if List.isEmpty sf then "0" else sf |> String.concat " + "
             static member name (IdxExpr f) =
                 f |> Map.toList |> List.exactlyOne |> fst
             member this.Name = IdxExpr.name this
@@ -214,7 +215,7 @@ module Elements =
                 let mySym, myPri =
                     match op with
                     | Add -> "+", 1
-                    | Substract -> "_", 1
+                    | Substract -> "-", 1
                     | Multiply -> "*", 2
                     | Divide -> "/", 2
                     | Modulo -> "%", 2
@@ -347,17 +348,17 @@ module Elements =
     let derivFunc (fn: ElemFunc) =
 
         // get dimension names and add constant bias dimension
-        let funcIdxNames = fn.DimName @ ["1"]
-        let funcIdxRngs = (fn.Shape |> List.map (fun high -> 0L, high)) @ [1L, 1L]
+        let funcIdxNames1 = fn.DimName @ ["1"]
+        let funcIdxRngs1 = (fn.Shape |> List.map (fun high -> 0L, high)) @ [1L, 1L]
 
         // incoming derivative w.r.t. function
         let dExprArgName = sprintf "d%s" fn.Name
-        let dExpr = arg dExprArgName (funcIdxNames |> List.map (fun dim -> IdxExpr.factor dim Rat.One))
+        let dExpr = arg dExprArgName (fn.DimName |> List.map (fun dim -> IdxExpr.factor dim Rat.One))
         let dArgShapes = fn.ArgShape |> Map.add dExprArgName fn.Shape
 
         let processArg argName (IdxExprs argIdxs) dArg =
             // name the indices of the argument
-            let argIdxNames = argIdxs |> List.mapi (fun i _ -> sprintf "%s_%d" argName i)
+            let argIdxNames = argIdxs |> List.mapi (fun i _ -> sprintf "d%s_%d" argName i)
             let argIdxSizes = argIdxNames |> List.mapi (fun i name -> name, fn.ArgShape.[argName].[i]) |> Map.ofList
 
             // add "1" dimension to indices
@@ -365,10 +366,10 @@ module Elements =
             let argIdxNames1 = argIdxNames @ ["1"]
 
             // Construct matrix mapping from function indices to argument indices: argIdxMat[argDim, funcDim] 
-            let argIdxMat = IdxExprs.toMatrix funcIdxNames (IdxExprs argIdxs1)
+            let argIdxMat = IdxExprs.toMatrix funcIdxNames1 (IdxExprs argIdxs1)
 
             // Compute inverse of it.
-            let ci = Consumers.compute (Tensor.convert<bigint> argIdxMat) funcIdxRngs
+            let ci = Consumers.compute (Tensor.convert<bigint> argIdxMat) funcIdxRngs1
 
             // For now assume 1:1 mapping.
             // Get matrix mapping from argument indices to function indices: funcIdxMat[funcDim, argDim] 
@@ -379,7 +380,7 @@ module Elements =
                 List.zip argIdxNames1 argFacs
                 |> List.fold (fun expr (name, fac) -> expr + IdxExpr.factor name fac) IdxExpr.zero
             let subs =
-                List.zip funcIdxNames funcIdxMat
+                List.zip funcIdxNames1 funcIdxMat
                 |> List.map (fun (name, argFacs) -> name, argToIdxExprs argFacs)
                 |> Map.ofList
                 |> Map.add "1" IdxExpr.one
