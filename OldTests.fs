@@ -288,14 +288,38 @@ let testRectTransform() =
 
 
 let testElements1() =
-    let i = Elements.idx "i"
-    let j = Elements.idx "j"
-    let k = Elements.idx "k"
+    let i, iSize = Elements.pos "i", 3L
+    let j, jSize = Elements.pos "j", 4L
+    let k, kSize = Elements.pos "k", 5L
 
-    let expr = Elements.arg "x" [i; j] + 2.0 * (Elements.arg "y" [j; j] + Elements.arg "z" [k])
-    let func = Elements.func [i, 10L; j, 20L; k, 30L] expr
+    let xv = HostTensor.zeros [iSize; jSize] + 1.0
+    let yv = HostTensor.zeros [jSize; jSize] + 2.0
+    let zv = HostTensor.zeros [kSize] + 3.0
+
+    let dimNames = [i.Name; j.Name; k.Name]
+    let dimSizes = Map [i.Name, iSize; j.Name, jSize; k.Name, kSize]    
+    let argShapes = Map ["x", xv.Shape; "y", yv.Shape; "z", zv.Shape]
+
+    let expr = Elements.arg "x" [i; j] + 2.0 * (Elements.arg "y" [j; j] * Elements.arg "z" [k])
+    let func = Elements.func "f" dimNames dimSizes argShapes expr
 
     printfn "Function:\n%A" func
+    let argEnv = Map ["x", xv; "y", yv; "z", zv]
+    let fv = Elements.evalFunc argEnv func
+
+    printfn "x=\n%A" xv
+    printfn "y=\n%A" yv
+    printfn "z=\n%A" zv
+    printfn "f=\n%A" fv
+    
+    // derivative expression
+    let dfExpr = Elements.derivExpr func.Expr (Elements.arg "dIn" [])
+    printfn "df:\n%A" dfExpr
+
+    // derivative functions
+    let dFns = Elements.derivFunc func
+    printfn "dFns:\n%A" dFns
+
 
 
 

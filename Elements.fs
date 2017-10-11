@@ -10,8 +10,12 @@ module Elements =
     /// An expression for an index as a linear combination.
     [<StructuredFormatDisplay("{Pretty}")>]
     type IdxExpr = 
-        IdxExpr of Map<string, int64>
+        IdxExpr of Map<string, Rat>
         with
+            static member zero =
+                IdxExpr Map.empty
+            static member one =
+                IdxExpr.factor "1" Rat.One
             static member factor dim value =
                 IdxExpr (Map [dim, value])
             static member (~-) (IdxExpr af) =
@@ -23,9 +27,9 @@ module Elements =
                 IdxExpr f
             static member (-) (a: IdxExpr, b: IdxExpr) =
                 a + (-b)
-            static member (*) (f: int64, IdxExpr bf) =
+            static member (*) (f: Rat, IdxExpr bf) =
                 bf |> Map.map (fun bi bv -> f * bv) |> IdxExpr
-            static member (/) (IdxExpr af, f: int64) =
+            static member (/) (IdxExpr af, f: Rat) =
                 af |> Map.map (fun ai av -> av / f) |> IdxExpr
             member this.Pretty =
                 let (IdxExpr f) = this
@@ -33,13 +37,19 @@ module Elements =
                 |> List.map fst
                 |> List.sort
                 |> List.choose (fun n -> 
-                    if f.[n] = 0L then None
-                    elif f.[n] = 1L  then Some n
-                    elif f.[n] = -1L then Some ("-" + n)
-                    else Some (sprintf "%d*%s" f.[n] n))
+                    if f.[n] = Rat.Zero then None
+                    elif f.[n] = Rat.One then Some n
+                    elif f.[n] = Rat.MinusOne then Some ("-" + n)
+                    else Some (sprintf "%A*%s" f.[n] n))
                 |> String.concat " + "
             static member name (IdxExpr f) =
                 f |> Map.toList |> List.exactlyOne |> fst
+            member this.Name = IdxExpr.name this
+            static member eval idxEnv (IdxExpr f) =
+                let idxEnv = idxEnv |> Map.add "1" Rat.One
+                f |> Map.fold (fun s i v -> s + v * idxEnv.[i]) Rat.Zero
+            static member subst (repl: Map<string, IdxExpr>) (IdxExpr f) =
+                f |> Map.fold (fun r i v -> r + v * repl.[i]) IdxExpr.zero
 
     /// Index expressions for all indicies of a tensor.
     [<StructuredFormatDisplay("{Pretty}")>]    
@@ -59,11 +69,17 @@ module Elements =
             member this.Pretty =
                 let (IdxExprs idx) = this
                 sprintf "%A" idx
+            static member eval idxEnv (IdxExprs idx) =
+                idx |> List.map (IdxExpr.eval idxEnv)
+            static member subst repl (IdxExprs idx) =
+                idx |> List.map (IdxExpr.subst repl) |> IdxExprs
+            static member length (IdxExprs idx) =
+                List.length idx
 
     type LeafOp =
         | Const of float
-        | IdxValue of idx:IdxExprs
-        | Argument of name:string * idx:IdxExprs
+        | IdxValue of idx:IdxExpr
+        | Argument of name:string * idxs:IdxExprs
 
     and UnaryOp = 
         | Negate                        
@@ -93,22 +109,35 @@ module Elements =
         | Unary of UnaryOp * ElemExpr
         | Binary of BinaryOp * ElemExpr * ElemExpr
 
-    and Dim = string * int64
-
     and [<StructuredFormatDisplay("{Pretty}")>]
         ElemFunc = {
+            Name:       string
+            DimName:    string list
+            DimSize:    Map<string, int64>
             Expr:       ElemExpr
-            Shape:      Dim list
+            ArgShape:   Map<string, int64 list>
         } with
             member this.Pretty =
-                let dims =
-                    this.Shape
-                    |> List.map fst
-                    |> String.concat "; "
-                sprintf "f[%s] = %A" dims this.Expr
+                let dims = this.DimName |> String.concat "; "
+                sprintf "%s[%s] = %A" this.Name dims this.Expr
+            member this.Shape = 
+                this.DimName |> List.map (fun d -> this.DimSize.[d])
 
-    let func dims expr =
-        {Expr=expr; Shape=dims |> List.map (fun (i, s) -> IdxExpr.name i, s)}
+    let rec extractArgs expr =
+        match expr with
+        | Leaf (Argument (name, idxs)) -> Set [name, idxs]
+        | Leaf _ -> Set.empty
+        | Unary (_, a) -> extractArgs a
+        | Binary (_, a, b) -> Set.union (extractArgs a) (extractArgs b)
+
+    let func name dimNames dimSizes argShapes expr =
+        for (argName, argIdx) in extractArgs expr do
+            match argShapes |> Map.tryFind argName with
+            | Some shp when IdxExprs.length argIdx <> List.length shp -> 
+                failwithf "shape dimensionality mismatch for argument %s" argName
+            | Some shp -> ()
+            | None -> failwithf "no shape specified for argument %s" argName                
+        {Name=name; DimName=dimNames; DimSize=dimSizes; Expr=expr; ArgShape=argShapes}
 
     /// a constant value given by a ConstSpec
     let scalar v = Leaf (Const v) 
@@ -220,12 +249,166 @@ module Elements =
         Leaf (Argument (name, IdxExprs idx))
 
     /// index of given name
-    let idx name = IdxExpr.factor name 1L
+    let pos name = IdxExpr.factor name Rat.One
 
     /// constant index value
     let idxConst v = IdxExpr.factor "1" v
 
-    
+    /// substitutes the specified size symbols with their replacements 
+    let rec substIdx repl expr = 
+        let sub = substIdx repl
+        match expr with
+        | Leaf (IdxValue idx) -> Leaf (IdxValue (IdxExpr.subst repl idx))
+        | Leaf (Argument (name, idxs)) -> Leaf (Argument (name, IdxExprs.subst repl idxs))
+        | Leaf (op) -> Leaf (op)
+        | Unary (op, a) -> Unary (op, sub a)
+        | Binary (op, a, b) -> Binary (op, sub a, sub b)
+
+    let rec evalExpr (argEnv: Map<string, Tensor<float>>) idxEnv expr =
+        let subEval = evalExpr argEnv idxEnv
+        match expr with
+        | Leaf op ->
+            match op with
+            | Const v -> v
+            | IdxValue idx -> idx |> IdxExpr.eval idxEnv |> float
+            | Argument (name, idxs) -> 
+                let idxs = idxs |> IdxExprs.eval idxEnv |> List.map int64
+                let arg = argEnv.[name]
+                arg.[idxs]
+
+        | Unary (op, a) ->
+            let av = subEval a
+            match op with
+            | Negate -> -av 
+            | Abs -> abs av 
+            | Sgn -> Operators.sgn av
+            | Log -> log av
+            | Log10 -> log10 av
+            | Exp -> exp av
+            | Tanh -> tanh av
+            | Sqrt -> sqrt av
+
+        | Binary (op, a, b) ->
+            let av, bv = subEval a, subEval b
+            match op with
+            | Add -> av + bv
+            | Substract -> av - bv                
+            | Multiply -> av * bv          
+            | Divide -> av / bv           
+            | Modulo -> av % bv
+            | Power -> av ** bv
+
+    let evalFunc argEnv (func: ElemFunc) =
+        let fv = HostTensor.zeros func.Shape
+        for pos in TensorLayout.allIdxOfShape func.Shape do
+            //printfn "pos is %A" pos
+            let idxEnv =
+                List.zip pos func.DimName
+                |> List.fold (fun env (p, name) -> env |> Map.add name (Rat p)) Map.empty
+            fv.[pos] <- evalExpr argEnv idxEnv func.Expr
+        fv
+
+    let rec derivExpr expr dExpr =            
+        let d = dExpr        
+        let rds = derivExpr
+        match expr with
+        | Leaf op ->
+            match op with
+            | Const v -> Map.empty
+            | IdxValue idx -> Map.empty
+            | Argument (name, idxs) -> Map [(name, idxs), d]
+        | Unary (op, a) ->
+            match op with
+            | Negate -> -d |> rds a
+            | Abs -> d * sgn a |> rds a
+            | Sgn -> Map.empty
+            | Log -> d * (a ** -1.0) |> rds a
+            | Log10 -> d |> rds (log a / log 10.0)
+            | Exp -> d * exp a |> rds a
+            | Tanh -> d * (1.0 - (tanh a)**2.0) |> rds a
+            | Sqrt -> d * (1.0 / (2.0 * sqrtt a)) |> rds a
+        | Binary (op, a, b) ->
+            let (.+) da db =
+                let aDeriv = rds a da
+                let bDeriv = rds b db
+                (aDeriv, bDeriv)
+                ||> Map.fold (fun m v vg -> match Map.tryFind v m with
+                                            | Some ovg -> m |> Map.add v (vg + ovg)
+                                            | None -> m |> Map.add v vg)                 
+            match op with
+            | Add -> d .+ d
+            | Substract -> d .+ (-d)
+            | Multiply -> (d * b) .+ (a * d)
+            | Divide -> d |> rds (a * b ** -1.0)
+            | Modulo -> failwith "buggy"
+            | Power ->  (d * b * a**(b - 1.0)) .+ (d * a**b * log a)
+
+
+    let derivFunc (fn: ElemFunc) =
+
+        // get dimension names and add constant bias dimension
+        let funcIdxNames = fn.DimName @ ["1"]
+        let funcIdxRngs = (fn.Shape |> List.map (fun high -> 0L, high)) @ [1L, 1L]
+
+        // incoming derivative w.r.t. function
+        let dExprArgName = sprintf "d%s" fn.Name
+        let dExpr = arg dExprArgName (funcIdxNames |> List.map (fun dim -> IdxExpr.factor dim Rat.One))
+        let dArgShapes = fn.ArgShape |> Map.add dExprArgName fn.Shape
+
+        let processArg argName (IdxExprs argIdxs) dArg =
+            // name the indices of the argument
+            let argIdxNames = argIdxs |> List.mapi (fun i _ -> sprintf "%s_%d" argName i)
+            let argIdxSizes = argIdxNames |> List.mapi (fun i name -> name, fn.ArgShape.[argName].[i]) |> Map.ofList
+
+            // add "1" dimension to indices
+            let argIdxs1 = argIdxs @ [IdxExpr.one]
+            let argIdxNames1 = argIdxNames @ ["1"]
+
+            // Construct matrix mapping from function indices to argument indices: argIdxMat[argDim, funcDim] 
+            let argIdxMat = IdxExprs.toMatrix funcIdxNames (IdxExprs argIdxs1)
+
+            // Compute inverse of it.
+            let ci = Consumers.compute (Tensor.convert<bigint> argIdxMat) funcIdxRngs
+
+            // For now assume 1:1 mapping.
+            // Get matrix mapping from argument indices to function indices: funcIdxMat[funcDim, argDim] 
+            let funcIdxMat = ci.YToX |> HostTensor.toList2D
+
+            // Substitute function indices with argument indices in derivative.
+            let rec argToIdxExprs (argFacs: Rat list) =
+                List.zip argIdxNames1 argFacs
+                |> List.fold (fun expr (name, fac) -> expr + IdxExpr.factor name fac) IdxExpr.zero
+            let subs =
+                List.zip funcIdxNames funcIdxMat
+                |> List.map (fun (name, argFacs) -> name, argToIdxExprs argFacs)
+                |> Map.ofList
+                |> Map.add "1" IdxExpr.one
+            let dArgExpr = substIdx subs dArg 
+
+            // build function
+            func (sprintf "d%s" argName) argIdxNames argIdxSizes dArgShapes dArgExpr
+
+        // calculate derivative expressions w.r.t. all arguments
+        let dArgIdxExprs = derivExpr fn.Expr dExpr
+            
+        // perform index substitution on the derivatives of all arguments
+        let dArgIdxFns =
+            dArgIdxExprs
+            |> Map.toList
+            |> List.map (fun ((argName, argIdxs), dArg) -> processArg argName argIdxs dArg)
+
+        // sum by argument
+        let dArgFns = 
+            dArgIdxFns
+            |> List.groupBy (fun ef -> ef.Name)
+            |> List.map (fun (dArgName, dArgs) -> 
+                dArgName, dArgs |> List.reduce (fun a {Expr=bExpr} -> {a with Expr=a.Expr + bExpr}))
+            |> Map.ofList
+
+        dArgFns
+
+
+
     // /// checks if the arguments' shapes are compatible with the result shape and that the types match
     // let checkCompatibility (expr: ElemExpr) (argShapes: ShapeSpecT list) (argTypes: TypeNameT list) 
     //         (resShape: ShapeSpecT) =
@@ -262,23 +445,3 @@ module Elements =
     //         | Unary (_, a) -> check a
     //         | Binary (_, a, b) -> check a; check b
     //     check expr
-
-    // /// substitutes the specified size symbols with their replacements 
-    // let rec substSymSizes symSizes expr = 
-    //     let sSub = substSymSizes symSizes
-    //     let sSize = SymSizeEnv.subst symSizes
-    //     let sShp = SymSizeEnv.substShape symSizes
-
-    //     match expr with
-    //     | Leaf (SizeValue (sc, tn)) -> Leaf (SizeValue ((sSize sc), tn))
-    //     | Leaf (ArgElement ((arg, argIdxs), tn)) -> Leaf (ArgElement ((arg, sShp argIdxs), tn))
-    //     | Leaf _ -> expr
-
-    //     | Unary (Sum (sym, first, last), a) -> 
-    //         Unary (Sum (sym, sSize first, sSize last), sSub a)
-    //     | Unary (KroneckerRng (sym, first, last), a) ->
-    //         Unary (KroneckerRng (sSize sym, sSize first, sSize last), sSub a)
-    //     | Unary (op, a) -> Unary (op, sSub a)
-    //     | Binary (IfThenElse (left, right), a, b) ->
-    //         Binary (IfThenElse (sSize left, sSize right), sSub a, sSub b)
-    //     | Binary (op, a, b) -> Binary (op, sSub a, sSub b)
