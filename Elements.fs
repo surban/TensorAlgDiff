@@ -82,6 +82,34 @@ module Elements =
         | IdxValue of idx:IdxExpr
         | Argument of name:string * idxs:IdxExprs
 
+    // Okay, so how to add the nice summation?
+    // the nice summation is determined by the ConsumerInfo
+    // The ConsumerInfo tells us that we have to sum over the Nullspace.
+    // so first we have to see how a summation is implemented as an operation
+    // There are several possibilities for that.
+    // How to define the sum?
+    // 1. a summation takes place over one variable and we nest the sums
+    // 2. the sum needs to know its ranges which are specified by the constraints
+    // 3. these constraint may depend on already defined indices
+    // 4. multiple constraints may exist and act as an AND relation
+    // Constraint system for a general sum.
+    // L .* s >= R .* i
+    // where s are the summation indices.
+    // Hmmm, but this doesn't make sense for what we have in ConsumerInfo.
+    // There we have a whole system...
+    // Yes, there its describing multiple sums, but probably it can be factorized from the
+    // Fourier-Motzkin presolution.
+    // So the Foruier-Motzkin is, after elimination, giving a set of constraints for the last variable only.
+    // But then it the backsubstitution step, its using these values.
+    // Yes.
+    // So theoretically they could be brought to the other side and just become independant indices, i.e. is.
+    // Then the substitution would be done in the matrix multiplication with R.
+    // So next step:
+    // - figure out how to replace backsubstitution of Fourer-Motzkin by right-side multiplication
+
+
+
+
     and UnaryOp = 
         | Negate                        
         | Abs
@@ -91,7 +119,7 @@ module Elements =
         | Exp                           
         | Tanh
         | Sqrt
-        //| Sum of SizeSymbolT * SizeSpecT * SizeSpecT
+        //| Sum of idx:string * 
         //| KroneckerRng of SizeSpecT * SizeSpecT * SizeSpecT
 
     and BinaryOp = 
@@ -370,6 +398,15 @@ module Elements =
 
             // Compute inverse of it.
             let ci = Consumers.compute (Tensor.convert<bigint> argIdxMat) funcIdxRngs1
+
+            // TODO:
+            // - add summation
+            // - add solvability
+
+
+
+
+
 
             // For now assume 1:1 mapping.
             // Get matrix mapping from argument indices to function indices: funcIdxMat[funcDim, argDim] 

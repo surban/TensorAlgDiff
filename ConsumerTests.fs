@@ -211,3 +211,71 @@ let testInequal () =
         printfn "No solution exists."
     ()
 
+
+let testInequal2 () =
+    // let A = [[ 3; 5; 7; 8]
+    //          [-5; 5; 2; 3]
+    //          [ 0; 1; 2; 3]
+    //          [ 1; 2; 3; 4]] |> HostTensor.ofList2D |> Tensor.convert<Rat>
+    // let b = [2; 3; 4; 0] |> HostTensor.ofList |> Tensor.convert<Rat>
+
+    let A = [[ 3; 5; 7; 8]
+             [-5; 5; 2; 3]
+             [ 0; 1; 2; 3]
+             [ 0; 0; 0; 1]
+             [ 0; 0; 0; -1]] |> HostTensor.ofList2D |> Tensor.convert<Rat>
+    let b = [2; 3; 4; 10; 9] |> HostTensor.ofList |> Tensor.convert<Rat>
+
+
+    // let A = [[ 1;  0; 0]
+    //          [-1; -2; 0]
+    //          [ 1;  1; 0]
+    //          [ 1; -1; 0]
+    //          [ 0;  1; 0]
+    //          [ 2;  1; 1]]
+    //         |> HostTensor.ofList2D |> Tensor.convert<Rat>
+    // let b = [0; -6; 2; 3; 0; 0] |> HostTensor.ofList |> Tensor.convert<Rat>
+
+    printMat "A" A
+    printMat "b" b
+
+    let ps = FourierMotzkin.presolve A
+    let gs = FourierMotzkin.genSolve ps
+
+    // printfn "gensolve:"
+    // for s in gs do
+    //     printfn "%A" s
+    //     printfn ""
+
+    printfn "Interpreting:"
+    gs |> List.fold (fun xs s ->
+        let low, high = FourierMotzkin.genSubst s b (HostTensor.ofList xs)
+        printfn "%A <= x_%d <= %A" low s.Idx high
+        let value = 
+            if low > high then Rat.NaN
+            elif low > Rat.NegInf then low
+            elif high < Rat.PosInf then high
+            else Rat.Zero
+        printfn "Setting x_%d = %A" s.Idx value
+        if value.IsNaN then printfn "No solution exists!"
+        value::xs) [] |> ignore
+
+    printfn "Old solution method:"
+    let sol = FourierMotzkin.solve (FourierMotzkin.presolve A) b  
+    match sol with
+    | Some sol ->        
+        printfn "Solution exists:"
+        let rec printSol sol =
+            let j = FourierMotzkin.active sol
+            if j >= 0L then
+                let low, high = FourierMotzkin.range sol
+                printfn "%A <= x_%d <= %A" low j high
+                let value = 
+                    if low > Rat.NegInf then low
+                    elif high < Rat.PosInf then high
+                    else Rat.Zero
+                printfn "Setting x_%d = %A" j value
+                printSol (sol |> FourierMotzkin.subst value)
+        printSol sol        
+    | None ->
+        printfn "No solution exists."

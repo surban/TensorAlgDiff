@@ -33,9 +33,16 @@ type Solution = {
 
 
 /// Solves a system of inequalities of the form A .* x >= b.
+/// A must not contain rows of zeros.
 /// b is specifed using the function solve.
 let presolve (A: Tensor<Rat>) =   
-    let m, n = A.Shape.[0], A.Shape.[1]
+    let m, n = 
+        match A.Shape with
+        | [m; n] -> m, n
+        | _ -> invalidArg "A" "A must be a matrix"
+    if A ==== Rat.Zero |> Tensor.allAxis 1 |> Tensor.any then
+        invalidArg "A" "A must not contain rows of zeros"
+        
     let rec eliminate (rA: Tensor<Rat>) (rB: Tensor<Rat>) rAs rBs arb =
         let k = List.length rAs |> int64
         //printfn "Elimination step %d:" k
@@ -98,6 +105,61 @@ let presolve (A: Tensor<Rat>) =
 
     let B = HostTensor.identity m
     eliminate A B [] [] Set.empty
+
+
+
+/// Low limits:  x[Idx] >= BiasTransformLow  .* b - SubstLow  .* x.[Idx+1..]
+/// High limits: x[Idx] <= BiasTransformHigh .* b - SubstHigh .* x.[Idx+1..]
+type GenSolution = {
+    Idx:                int64
+    BiasLow:            Tensor<Rat>
+    BiasHigh:           Tensor<Rat>
+    SubstLow:           Tensor<Rat>
+    SubstHigh:          Tensor<Rat>
+}
+
+
+let genSolve (ps: Presolution) =
+
+    List.zip ps.ReducedA ps.ReducedB
+    |> List.mapi (fun i (rA, rB) ->
+        // active x_j
+        let j = ps.ReducedA.Length - i - 1 |> int64    
+
+        // split B for lower and upper limit of x_j
+        let Blow = rB.M(rA.[*,j] ==== Rat.One, NoMask)
+        let Bhigh = -rB.M(rA.[*,j] ==== Rat.MinusOne, NoMask)
+
+        // substitute the values into the system: x = [0; ...; 0; v_j; ...; v_n]
+        // solution: B .* y - A .* x.[j..n]
+        let C = -rA.[*, j+1L..]
+        printfn "C for %d=\n%A" j C
+
+        // split C for lower and upper limit of x_j
+        let Clow = C.M(rA.[*,j] ==== Rat.One, NoMask)
+        let Chigh = -C.M(rA.[*,j] ==== Rat.MinusOne, NoMask)
+       
+        {
+            Idx=j
+            BiasLow=Blow
+            BiasHigh=Bhigh
+            SubstLow=Clow
+            SubstHigh=Chigh
+        }
+    )
+
+
+let genSubst (gs: GenSolution) (b: Tensor<Rat>) (x: Tensor<Rat>) =
+    match b.Shape with
+    | [l] when l = gs.BiasLow.Shape.[1] -> ()
+    | _ -> invalidArg "b" "wrong number of bias variables"
+    match x.Shape with
+    | [l] when l = gs.SubstLow.Shape.[1] -> ()
+    | _ -> invalidArg "x" "wrong number of substitution variables"    
+
+    let lows = gs.BiasLow .* b + gs.SubstLow .* x
+    let highs = gs.BiasHigh .* b + gs.SubstHigh .* x
+    Tensor.max lows, Tensor.min highs
 
 
 /// Specifies b in a presolved system.
