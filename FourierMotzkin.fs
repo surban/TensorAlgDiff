@@ -7,8 +7,8 @@ open Tensor
 
 /// A range for a particular element of x in a system of inequalities.
 /// The low limits and high limits for x[Idx] are given as follows:
-/// Low limits:  x[Idx] >= BiasTransformLow  .* b - SubstLow  .* x.[Idx+1L..]
-/// High limits: x[Idx] <= BiasTransformHigh .* b - SubstHigh .* x.[Idx+1L..]
+/// Low limits:  x[Idx] >= BLow  .* b - SLow  .* x.[Idx+1L..]
+/// High limits: x[Idx] <= BHigh .* b - SHigh .* x.[Idx+1L..]
 /// If a low limits is larger that a high limit, then no solution exists.
 type Range = {
     /// Index of x element this solution is for.

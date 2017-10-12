@@ -41,6 +41,7 @@ module Elements =
                         if f.[n] = Rat.Zero then None
                         elif f.[n] = Rat.One then Some n
                         elif f.[n] = Rat.MinusOne then Some ("-" + n)
+                        elif n = "1" then Some (sprintf "%A" f.[n])
                         else Some (sprintf "%A*%s" f.[n] n))
                 if List.isEmpty sf then "0" else sf |> String.concat " + "
             static member name (IdxExpr f) =
@@ -108,8 +109,6 @@ module Elements =
     // - figure out how to replace backsubstitution of Fourer-Motzkin by right-side multiplication
 
 
-
-
     and UnaryOp = 
         | Negate                        
         | Abs
@@ -119,7 +118,7 @@ module Elements =
         | Exp                           
         | Tanh
         | Sqrt
-        //| Sum of idx:string * 
+        | Sum of idx:string * lows:IdxExpr list * highs:IdxExpr list
         //| KroneckerRng of SizeSpecT * SizeSpecT * SizeSpecT
 
     and BinaryOp = 
@@ -237,6 +236,7 @@ module Elements =
                     | Exp -> sprintf "exp %s" aStr
                     | Tanh -> sprintf "tanh %s" aStr
                     | Sqrt -> sprintf "sqrt %s" aStr
+                    | Sum (sym, lows, highs) -> sprintf "sum:%s_%A^%A (%s)" sym lows highs aStr
                 myStr, myPri
                 
             | Binary(op, a, b) -> 
@@ -282,6 +282,9 @@ module Elements =
 
     /// constant index value
     let idxConst v = IdxExpr.factor "1" v
+
+    let sum idx lows highs a =
+        Unary (Sum (idx, lows, highs), a)
 
     /// substitutes the specified size symbols with their replacements 
     let rec substIdx repl expr = 
@@ -399,29 +402,58 @@ module Elements =
             // Compute inverse of it.
             let ci = Consumers.compute (Tensor.convert<bigint> argIdxMat) funcIdxRngs1
 
-            // TODO:
-            // - add summation
-            // - add solvability
-
-
-
-
-
-
             // For now assume 1:1 mapping.
             // Get matrix mapping from argument indices to function indices: funcIdxMat[funcDim, argDim] 
             let funcIdxMat = ci.YToX |> HostTensor.toList2D
 
-            // Substitute function indices with argument indices in derivative.
-            let rec argToIdxExprs (argFacs: Rat list) =
-                List.zip argIdxNames1 argFacs
+            let toIdxExpr (names: string list) (facs: Rat list) =
+                List.zip names facs
                 |> List.fold (fun expr (name, fac) -> expr + IdxExpr.factor name fac) IdxExpr.zero
+
+            // Substitute function indices with argument indices in derivative.
             let subs =
                 List.zip funcIdxNames1 funcIdxMat
-                |> List.map (fun (name, argFacs) -> name, argToIdxExprs argFacs)
+                |> List.map (fun (name, argFacs) -> name, toIdxExpr argIdxNames1 argFacs)
                 |> Map.ofList
                 |> Map.add "1" IdxExpr.one
             let dArgExpr = substIdx subs dArg 
+
+            let limitIdxExprs (rng: FourierMotzkin.Range) (substSyms: string list) =
+                let lows, highs = List.unzip ci.Ranges
+                let lows = lows |> HostTensor.ofList |> Tensor.convert<Rat>
+                let highs = highs |> HostTensor.ofList |> Tensor.convert<Rat>            
+                let bLowConst = rng.BLow .* Tensor.concat 0 [lows; -highs] |> HostTensor.toList
+                let bHighConst = rng.BHigh .* Tensor.concat 0 [lows; -highs] |> HostTensor.toList
+                let bLowMat = rng.BLow .* Tensor.concat 0 [-ci.YToX; ci.YToX] |> HostTensor.toList2D
+                let bHighMat = rng.BHigh .* Tensor.concat 0 [-ci.YToX; ci.YToX] |> HostTensor.toList2D
+                let sLowMat = rng.SLow |> HostTensor.toList2D
+                let sHighMat = rng.SHigh |> HostTensor.toList2D
+                // now make it an index expression                
+                let lows = 
+                    List.zip3 bLowConst bLowMat sLowMat
+                    |> List.map (fun (c, bFacs, sFacs) -> 
+                        c * IdxExpr.one + toIdxExpr argIdxNames1 bFacs + toIdxExpr substSyms sFacs)
+                let highs = 
+                    List.zip3 bHighConst bHighMat sHighMat
+                    |> List.map (fun (c, bFacs, sFacs) -> 
+                        c * IdxExpr.one + toIdxExpr argIdxNames1 bFacs + toIdxExpr substSyms sFacs)
+                lows, highs
+
+            let rec buildSum summand sols sumSyms =
+                match sols with
+                | FourierMotzkin.Feasibility fs :: rSols ->
+                    // TODO
+                    buildSum summand rSols sumSyms
+                | FourierMotzkin.Range rng :: rSols ->
+                    let lows, highs = limitIdxExprs rng sumSyms
+                    let sumSym = sprintf "d%s_z%d" argName rng.Idx
+                    let summand = buildSum summand rSols (sumSym::sumSyms)
+                    sum sumSym lows highs summand
+                | [] -> summand
+
+            let dArgExpr = buildSum dArgExpr ci.ConstraintsLeft []
+
+            //printfn "arg: %s  nullspace:%A" argName ci.Nullspace
 
             // build function
             func (sprintf "d%s" argName) argIdxNames argIdxSizes dArgShapes dArgExpr
