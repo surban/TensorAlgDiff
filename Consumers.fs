@@ -32,9 +32,9 @@ type ConsumerInfo = {
     YToX:               Tensor<Rat>
     /// Matrix of null-space basis.
     Nullspace:          Tensor<bigint> 
-    /// Presolution of left side of constaint system.
+    /// Solution of left side of constaint system.
     /// Right side is given by: [low - YToX .* y; -high + YToX .* y]
-    ConstraintsLeft:    FourierMotzkin.Presolution
+    ConstraintsLeft:    FourierMotzkin.Solutions
     /// X ranges.
     Ranges:             Range list
 }
@@ -59,13 +59,13 @@ let compute (m: Tensor<bigint>) (rngs: Range list) =
     // Thus: Nullspace_i* .* z >=  low_i  - YToX_i* .* y
     //      -Nullspace_i* .* z >= -high_i + YToX_i* .* y
     let cLeft = Tensor.concat 0 [N; -N] 
-    let cPresol = FourierMotzkin.presolve (Tensor.convert<Rat> cLeft)
+    let cSol = FourierMotzkin.solve (Tensor.convert<Rat> cLeft)
 
     {
         Solvability     = S
         YToX            = I
         Nullspace       = N
-        ConstraintsLeft = cPresol
+        ConstraintsLeft = cSol
         Ranges          = rngs
     }    
 
@@ -93,25 +93,25 @@ let get (ci: ConsumerInfo) (y: Tensor<bigint>) =
         let cRight = Tensor.concat 0 [cRight1; cRight2]
         //printfn "cRight=\n%A" cRight
 
-        match FourierMotzkin.solve ci.ConstraintsLeft cRight with
-        | Some sol ->
-            let rec doIter sol z = seq {
-                let j = FourierMotzkin.active sol
-                if j >= 0L then
-                    let zjLow, zjHigh = FourierMotzkin.range sol
-                    let zjLow = zjLow |> ceil |> int
-                    let zjHigh = zjHigh |> floor |> int                
-                    for zj in zjLow .. zjHigh do
-                        yield! (doIter (sol |> FourierMotzkin.subst (Rat zj)) (zj :: z))
-                else
-                    let z = z |> HostTensor.ofList |> Tensor.convert<bigint>
-                    let x = xBase + ci.Nullspace .* z |> Tensor.convert<int64>
-                    yield (HostTensor.toList x)
-            }
-            doIter sol []
-        | None -> Seq.empty
+        let rec doIter sols z = seq {
+            match sols with
+            | (FourierMotzkin.Feasibility fs)::rSols ->
+                if FourierMotzkin.feasible fs cRight then
+                    yield! (doIter rSols z)
+            | (FourierMotzkin.Range rng)::rSols ->              
+                let zt = z |> HostTensor.ofList |> Tensor.convert<Rat>
+                let zjLow, zjHigh = FourierMotzkin.range rng cRight zt
+                let zjLow = zjLow |> ceil |> int
+                let zjHigh = zjHigh |> floor |> int                
+                for zj in zjLow .. zjHigh do
+                    yield! (doIter rSols (zj::z))
+            | [] ->
+                let z = z |> HostTensor.ofList |> Tensor.convert<bigint>
+                let x = xBase + ci.Nullspace .* z |> Tensor.convert<int64>
+                yield (HostTensor.toList x)
+        }
+        doIter ci.ConstraintsLeft []
     else
-        // System not solvable.
         Seq.empty
 
 

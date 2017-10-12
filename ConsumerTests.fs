@@ -12,7 +12,7 @@ open OldTests
 
 let testConsumers() =
 
-    let xRngs = [(0L, 10L); (0L, 20L); (0L, 50L)]
+    let xRngs = [(-10L, 10L); (-10L, 20L); (-50L, 50L)]
 
     // let M = [[2; 1; 3];
     //          [1; 2; 3];
@@ -24,7 +24,7 @@ let testConsumers() =
              [1; 2; 3];
              [1; 2; 3]]      
 
-    let y = [20; 6; 6] 
+    let y = [6; 6; 6] 
 
 
     // Y = M .* X
@@ -164,118 +164,60 @@ let testConsumers2() =
     let t11 = async { doVerify M [(0L, 10L); (0L, 5L); (0L, 7L); (0L, 8L)] }
 
     let M = [[0; 0; 0; 0];
-             [0; 0; 0; 0];
-             [0; 0; 0; 0];
+             [0; 0; 0; 1];
+             [0; 0; 0; 1];
              [4; 7; 3; 5]]
     let t12 = async { doVerify M [(0L, 10L); (0L, 5L); (0L, 7L); (0L, 8L)] }    
 
     Async.Parallel [t1; t2; t3; t4; t5; t6; t7; t8; t9; t10; t11; t12] |> Async.RunSynchronously |> ignore
 
 
+
+let solveInequalSystem A b =
+    let A = A |> HostTensor.ofList2D |> Tensor.convert<Rat>
+    let b = b |> HostTensor.ofList |> Tensor.convert<Rat>
+
+    printfn "Solving A .* x >= b with:"    
+    printMat "A" A
+    printMat "b" b
+
+    let ps = FourierMotzkin.solve A
+    let xs = 
+        ps |> List.fold (fun xs s ->
+            match xs, s with
+            | _, FourierMotzkin.Feasibility fs ->
+                if FourierMotzkin.feasible fs b then xs
+                else None
+            | Some xs, FourierMotzkin.Range rng ->
+                let low, high = FourierMotzkin.range rng b (HostTensor.ofList xs)
+                printfn "%A <= x_%d <= %A" low rng.Idx high
+                let value = 
+                    if low > high then Rat.NaN
+                    elif low > Rat.NegInf then low
+                    elif high < Rat.PosInf then high
+                    else Rat.Zero
+                printfn "Setting x_%d = %A" rng.Idx value
+                if value.IsNaN then None
+                else Some (value::xs)
+            | None, _ -> None        
+        ) (Some [])
+    printfn "One possible solution: x=%A" xs
+
 let testInequal () =
     let A = [[ 3; 5; 7; 8]
              [-5; 5; 2; 3]
              [ 0; 1; 2; 3]
-             [ 1; 2; 3; 4]] |> HostTensor.ofList2D |> Tensor.convert<Rat>
-    let b = [2; 3; 4; 0] |> HostTensor.ofList |> Tensor.convert<Rat>
-
-    // let A = [[ 1;  0; 0]
-    //          [-1; -2; 0]
-    //          [ 1;  1; 0]
-    //          [ 1; -1; 0]
-    //          [ 0;  1; 0]
-    //          [ 2;  1; 1]]
-    //         |> HostTensor.ofList2D |> Tensor.convert<Rat>
-    // let b = [0; -6; 2; 3; 0; 0] |> HostTensor.ofList |> Tensor.convert<Rat>
-
-    printMat "A" A
-    printMat "b" b
-
-    let sol = FourierMotzkin.solve (FourierMotzkin.presolve A) b  
-    match sol with
-    | Some sol ->        
-        printfn "Solution exists:"
-        let rec printSol sol =
-            let j = FourierMotzkin.active sol
-            if j >= 0L then
-                let low, high = FourierMotzkin.range sol
-                printfn "%A <= x_%d <= %A" low j high
-                let value = 
-                    if low > Rat.NegInf then low
-                    elif high < Rat.PosInf then high
-                    else Rat.Zero
-                printfn "Setting x_%d = %A" j value
-                printSol (sol |> FourierMotzkin.subst value)
-        printSol sol        
-    | None ->
-        printfn "No solution exists."
-    ()
-
-
+             [ 1; 2; 3; 4]]
+    let b = [2; 3; 4; 0]
+    solveInequalSystem A b
+    
 let testInequal2 () =
-    // let A = [[ 3; 5; 7; 8]
-    //          [-5; 5; 2; 3]
-    //          [ 0; 1; 2; 3]
-    //          [ 1; 2; 3; 4]] |> HostTensor.ofList2D |> Tensor.convert<Rat>
-    // let b = [2; 3; 4; 0] |> HostTensor.ofList |> Tensor.convert<Rat>
-
     let A = [[ 3; 5; 7; 8]
              [-5; 5; 2; 3]
              [ 0; 1; 2; 3]
              [ 0; 0; 0; 1]
-             [ 0; 0; 0; -1]] |> HostTensor.ofList2D |> Tensor.convert<Rat>
-    let b = [2; 3; 4; 10; 9] |> HostTensor.ofList |> Tensor.convert<Rat>
+             [ 0; 0; 0; -1]]
+    let b = [2; 3; 4; 10; 9]
+    solveInequalSystem A b
 
 
-    // let A = [[ 1;  0; 0]
-    //          [-1; -2; 0]
-    //          [ 1;  1; 0]
-    //          [ 1; -1; 0]
-    //          [ 0;  1; 0]
-    //          [ 2;  1; 1]]
-    //         |> HostTensor.ofList2D |> Tensor.convert<Rat>
-    // let b = [0; -6; 2; 3; 0; 0] |> HostTensor.ofList |> Tensor.convert<Rat>
-
-    printMat "A" A
-    printMat "b" b
-
-    let ps = FourierMotzkin.presolve A
-    let gs = FourierMotzkin.genSolve ps
-
-    // printfn "gensolve:"
-    // for s in gs do
-    //     printfn "%A" s
-    //     printfn ""
-
-    printfn "Interpreting:"
-    gs |> List.fold (fun xs s ->
-        let low, high = FourierMotzkin.genSubst s b (HostTensor.ofList xs)
-        printfn "%A <= x_%d <= %A" low s.Idx high
-        let value = 
-            if low > high then Rat.NaN
-            elif low > Rat.NegInf then low
-            elif high < Rat.PosInf then high
-            else Rat.Zero
-        printfn "Setting x_%d = %A" s.Idx value
-        if value.IsNaN then printfn "No solution exists!"
-        value::xs) [] |> ignore
-
-    printfn "Old solution method:"
-    let sol = FourierMotzkin.solve (FourierMotzkin.presolve A) b  
-    match sol with
-    | Some sol ->        
-        printfn "Solution exists:"
-        let rec printSol sol =
-            let j = FourierMotzkin.active sol
-            if j >= 0L then
-                let low, high = FourierMotzkin.range sol
-                printfn "%A <= x_%d <= %A" low j high
-                let value = 
-                    if low > Rat.NegInf then low
-                    elif high < Rat.PosInf then high
-                    else Rat.Zero
-                printfn "Setting x_%d = %A" j value
-                printSol (sol |> FourierMotzkin.subst value)
-        printSol sol        
-    | None ->
-        printfn "No solution exists."

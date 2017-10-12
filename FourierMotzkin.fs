@@ -5,45 +5,45 @@ module FourierMotzkin
 open Tensor
 
 
-/// A possible solution to a system of inequalities without knowing the right-hand sides.
-type Presolution = {
-    /// right hand side matrix of fully reduced system
-    FeasibilityB:   Tensor<Rat> 
-    /// list of left sides of reduced systems
-    ReducedA:   Tensor<Rat> list
-    /// list of right side matrices of reduced systems
-    ReducedB:   Tensor<Rat> list
-    /// set of variable indicies that are arbitrary
-    Arbitrary:  Set<int64>
+/// A range for a particular element of x in a system of inequalities.
+/// The low limits and high limits for x[Idx] are given as follows:
+/// Low limits:  x[Idx] >= BiasTransformLow  .* b - SubstLow  .* x.[Idx+1L..]
+/// High limits: x[Idx] <= BiasTransformHigh .* b - SubstHigh .* x.[Idx+1L..]
+/// If a low limits is larger that a high limit, then no solution exists.
+type Range = {
+    /// Index of x element this solution is for.
+    Idx:        int64
+    /// Matrix to multiply b with to obtain low limits.
+    BLow:       Tensor<Rat>
+    /// Matrix to multiply b with to obtain high limits.
+    BHigh:      Tensor<Rat>
+    /// Matrix to multiply x.[Idx+1L..] with to obtain low limits.
+    SLow:       Tensor<Rat>
+    /// Matrix to multiply x.[Idx+1L..] with to obtain high limits.
+    SHigh:      Tensor<Rat>
 }
 
+/// Solution element.
+type Solution =
+    /// Specifies range for a particular element of x.
+    | Range of Range
+    /// Specifies that system only has solution if B .* b <= 0.
+    | Feasibility of B:Tensor<Rat>
 
-/// A solution to a system of inequalities.
-/// Use 'range' to obtain valid ranges and 'subst' to substitute a value for a variable.
-type Solution = {
-    /// list of left sides of reduced systems
-    ReducedA:   Tensor<Rat> list
-    /// list of right sides of reduced system
-    ReducedB:   Tensor<Rat> list
-    /// set of variable indicies that are arbitrary
-    Arbitrary:  Set<int64>
-    /// variable values for backsubstitution
-    Values:     Rat list
-}
+/// A possible solution to a system of inequalities.
+type Solutions = Solution list
 
-
-/// Solves a system of inequalities of the form A .* x >= b.
-/// A must not contain rows of zeros.
-/// b is specifed using the function solve.
-let presolve (A: Tensor<Rat>) =   
+/// Solves a system of inequalities of the form A .* x >= b for arbitrary b.
+let solve (A: Tensor<Rat>) : Solutions =   
     let m, n = 
         match A.Shape with
         | [m; n] -> m, n
         | _ -> invalidArg "A" "A must be a matrix"
-    if A ==== Rat.Zero |> Tensor.allAxis 1 |> Tensor.any then
-        invalidArg "A" "A must not contain rows of zeros"
-        
-    let rec eliminate (rA: Tensor<Rat>) (rB: Tensor<Rat>) rAs rBs arb =
+    let needFeasibilityCheck = 
+        A ==== Rat.Zero |> Tensor.allAxis 1 |> Tensor.any 
+
+    /// Elimination step.
+    let rec eliminate (rA: Tensor<Rat>) (rB: Tensor<Rat>) rAs rBs =
         let k = List.length rAs |> int64
         //printfn "Elimination step %d:" k
         //printfn "rA=\n%A" rA
@@ -67,17 +67,16 @@ let presolve (A: Tensor<Rat>) =
             if Tensor.all (rA.[*, k] ==== Rat.Zero) then
                 // all the coefficients of x_k are zero, thus it is arbitrary
                 //printfn "all x_k=0"
-                eliminate rA rB (rA::rAs) (rB::rBs) (arb |> Set.add k)
+                eliminate rA rB (rA::rAs) (rB::rBs) 
             elif Tensor.all (rA.[*, k] ==== Rat.One) || Tensor.all (rA.[*, k] ==== Rat.MinusOne) then
                 // the coefficients of x_k are all +1 or -1
                 //printfn "all x_k=+1 or all x_k=-1"
-                eliminate (rA.M(zRows, NoMask)) (rB.M(zRows, NoMask)) 
-                          (rA::rAs) (rB::rBs) (arb |> Set.union (Set [k+1L .. n-1L]))
+                eliminate (rA.M(zRows, NoMask)) (rB.M(zRows, NoMask)) (rA::rAs) (rB::rBs)
             elif Tensor.all ((rA.[*,k] ==== Rat.Zero) |||| (rA.[*,k] ==== Rat.One)) ||
                  Tensor.all ((rA.[*,k] ==== Rat.Zero) |||| (rA.[*,k] ==== Rat.MinusOne)) then
                 // the coefficients of x_k are a mix of 0 and +1 or a mix of 0 and -1
                 //printfn "x_k is mix of 0 and +1 or mix of 0 and -1"
-                eliminate (rA.M(zRows, NoMask)) (rB.M(zRows, NoMask)) (rA::rAs) (rB::rBs) arb
+                eliminate (rA.M(zRows, NoMask)) (rB.M(zRows, NoMask)) (rA::rAs) (rB::rBs) 
             else
                 //printfn "x_k has +1 and -1"
                 // there is at least one pair of inequalities with a +1 and a -1 coefficient for x_k
@@ -94,130 +93,62 @@ let presolve (A: Tensor<Rat>) =
                     |> List.map (fun (p, n) -> rB.[p..p, *] + rB.[n..n, *])
                     |> List.append [rB.M(zRows, NoMask)]
                     |> Tensor.concat 0      
-                eliminate nextRA nextRB (rA::rAs) (rB::rBs) arb
+                eliminate nextRA nextRB (rA::rAs) (rB::rBs) 
         else
-            {
-                FeasibilityB = rB
-                ReducedA = rAs
-                ReducedB = rBs
-                Arbitrary = arb
-            }
+            let feasibility = 
+                if needFeasibilityCheck && rB.Shape.[0] > 0L then [Feasibility rB]
+                else []
+            backSubst rAs rBs feasibility
 
-    let B = HostTensor.identity m
-    eliminate A B [] [] Set.empty
+    /// Backsubstitution step.
+    and backSubst rAs rBs sols =
+        match rAs, rBs with
+        | rA::rAs, rB::rBs ->
+            let k = List.length rAs |> int64
 
+            // split B for lower and upper limit of x_j
+            let Blow = rB.M(rA.[*,k] ==== Rat.One, NoMask)
+            let Bhigh = -rB.M(rA.[*,k] ==== Rat.MinusOne, NoMask)
 
+            // substitute the values into the system: x = [0; ...; 0; v_j; ...; v_n]
+            // solution: B .* y - A .* x.[j..n]
+            let S = -rA.[*, k+1L..]
+            //printfn "S for %d=\n%A" k S
 
-/// Low limits:  x[Idx] >= BiasTransformLow  .* b - SubstLow  .* x.[Idx+1..]
-/// High limits: x[Idx] <= BiasTransformHigh .* b - SubstHigh .* x.[Idx+1..]
-type GenSolution = {
-    Idx:                int64
-    BiasLow:            Tensor<Rat>
-    BiasHigh:           Tensor<Rat>
-    SubstLow:           Tensor<Rat>
-    SubstHigh:          Tensor<Rat>
-}
+            // split C for lower and upper limit of x_j
+            let Slow = S.M(rA.[*,k] ==== Rat.One, NoMask)
+            let Shigh = -S.M(rA.[*,k] ==== Rat.MinusOne, NoMask)          
 
+            let sol = Range {
+                Idx=k
+                BLow=Blow; BHigh=Bhigh
+                SLow=Slow; SHigh=Shigh
+            } 
+            backSubst rAs rBs (sol::sols)
+        | _ -> sols
 
-let genSolve (ps: Presolution) =
-
-    List.zip ps.ReducedA ps.ReducedB
-    |> List.mapi (fun i (rA, rB) ->
-        // active x_j
-        let j = ps.ReducedA.Length - i - 1 |> int64    
-
-        // split B for lower and upper limit of x_j
-        let Blow = rB.M(rA.[*,j] ==== Rat.One, NoMask)
-        let Bhigh = -rB.M(rA.[*,j] ==== Rat.MinusOne, NoMask)
-
-        // substitute the values into the system: x = [0; ...; 0; v_j; ...; v_n]
-        // solution: B .* y - A .* x.[j..n]
-        let C = -rA.[*, j+1L..]
-        printfn "C for %d=\n%A" j C
-
-        // split C for lower and upper limit of x_j
-        let Clow = C.M(rA.[*,j] ==== Rat.One, NoMask)
-        let Chigh = -C.M(rA.[*,j] ==== Rat.MinusOne, NoMask)
-       
-        {
-            Idx=j
-            BiasLow=Blow
-            BiasHigh=Bhigh
-            SubstLow=Clow
-            SubstHigh=Chigh
-        }
-    )
+    eliminate A (HostTensor.identity m) [] [] |> List.rev
 
 
-let genSubst (gs: GenSolution) (b: Tensor<Rat>) (x: Tensor<Rat>) =
+/// Checks system for feasibility.
+let feasible (fs: Tensor<Rat>) (b: Tensor<Rat>) =
     match b.Shape with
-    | [l] when l = gs.BiasLow.Shape.[1] -> ()
-    | _ -> invalidArg "b" "wrong number of bias variables"
-    match x.Shape with
-    | [l] when l = gs.SubstLow.Shape.[1] -> ()
-    | _ -> invalidArg "x" "wrong number of substitution variables"    
-
-    let lows = gs.BiasLow .* b + gs.SubstLow .* x
-    let highs = gs.BiasHigh .* b + gs.SubstHigh .* x
-    Tensor.max lows, Tensor.min highs
-
-
-/// Specifies b in a presolved system.
-/// Returns a solution if system is feasible and None otherwise.
-/// Use the functions 'range' and 'subst' to obtain the allowed
-/// ranges of the variables and substitute values for them in the inequality system.
-let solve (ps: Presolution) (b: Tensor<Rat>) =
-    let rB = ps.FeasibilityB .* b
-    if Tensor.any (rB >>>> Rat.Zero) then None
-    else 
-        Some {
-            ReducedA = ps.ReducedA
-            ReducedB = ps.ReducedB |> List.map (fun B -> B .* b)
-            Arbitrary = ps.Arbitrary
-            Values = []
-        }
+    | [l] when l = fs.Shape.[1] -> ()
+    | _ -> invalidArg "b" "b has wrong size"
+    Rat.Zero >>== fs .* b |> Tensor.all
     
 
-/// Gets the index j of the active variable x_j.
-/// Returns -1L if no variable is active, i.e. all variables have been substituted.
-/// A solution returned by 'solve' starts with the last element of x being active.
-/// Each call to 'subst' moves forward by one element.
-let active (sol: Solution) =
-    int64 sol.ReducedA.Length - 1L
+/// Returns the range (xMin, xMax) for x.[sol.Idx] so that xMin <= x.[sol.Idx] <= xMax given x.[sol.Idx+1L..].
+/// If xMin > xMax, then no solution exists.
+let range (sol: Range) (b: Tensor<Rat>) (xRight: Tensor<Rat>) =
+    match b.Shape with
+    | [l] when l = sol.BLow.Shape.[1] -> ()
+    | _ -> invalidArg "b" "b has wrong size"
+    match xRight.Shape with
+    | [l] when l = sol.SLow.Shape.[1] -> ()
+    | _ -> invalidArg "xRight" "wrong number of substitution variables"    
 
-
-/// Gets the allowed range of active variable.
-/// Returns a tuple (low, high).
-let range (sol: Solution) =
-    let j = active sol
-    if j < 0L then failwith "no variable active"
-    if sol.Arbitrary |> Set.contains j then
-        Rat.NegInf, Rat.PosInf
-    else
-        //printfn "Calculating range for x_%d:" j
-        // substitute the values into the system: x = [0; ...; 0; v_j; ...; v_n]
-        let A, b = List.head sol.ReducedA, List.head sol.ReducedB
-        //printfn "A=\n%A" A
-        //printfn "b=\n%A" b
-        let x = Tensor.concat 0 [HostTensor.zeros [j+1L]; HostTensor.ofList sol.Values] 
-        //printfn "x=\n%A" x
-        let s = b - A .* x
-        //printfn "s=\n%A" s
-        // if coefficient of x_j is +1, then line of s is lower limit for x_j
-        // if coefficient of x_j is -1, then line of -s is upper limit for x_j
-        let low = s.M(A.[*,j] ==== Rat.One) |> Tensor.max
-        let high = -s.M(A.[*,j] ==== Rat.MinusOne) |> Tensor.min
-        low, high
-
-
-/// Substitutes the active variable x_j with the given value, which must be within its allowed range,
-/// and makes the variables x_{j-1} active.
-let subst (value: Rat) (sol: Solution) =
-    let low, high = range sol
-    if not (low <= value && value <= high) then
-        failwithf "value %A out of required range: %A <= x_%d <= %A" value low (active sol) high
-    {sol with
-        ReducedA = List.tail sol.ReducedA
-        ReducedB = List.tail sol.ReducedB
-        Values = value :: sol.Values}
+    let lows = sol.BLow .* b + sol.SLow .* xRight
+    let highs = sol.BHigh .* b + sol.SHigh .* xRight
+    Tensor.max lows, Tensor.min highs
 
