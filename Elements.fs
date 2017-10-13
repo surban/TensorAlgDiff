@@ -101,32 +101,6 @@ module Elements =
         | IdxValue of idx:IdxExpr
         | Argument of name:string * idxs:IdxExprs
 
-    // Okay, so how to add the nice summation?
-    // the nice summation is determined by the ConsumerInfo
-    // The ConsumerInfo tells us that we have to sum over the Nullspace.
-    // so first we have to see how a summation is implemented as an operation
-    // There are several possibilities for that.
-    // How to define the sum?
-    // 1. a summation takes place over one variable and we nest the sums
-    // 2. the sum needs to know its ranges which are specified by the constraints
-    // 3. these constraint may depend on already defined indices
-    // 4. multiple constraints may exist and act as an AND relation
-    // Constraint system for a general sum.
-    // L .* s >= R .* i
-    // where s are the summation indices.
-    // Hmmm, but this doesn't make sense for what we have in ConsumerInfo.
-    // There we have a whole system...
-    // Yes, there its describing multiple sums, but probably it can be factorized from the
-    // Fourier-Motzkin presolution.
-    // So the Foruier-Motzkin is, after elimination, giving a set of constraints for the last variable only.
-    // But then it the backsubstitution step, its using these values.
-    // Yes.
-    // So theoretically they could be brought to the other side and just become independant indices, i.e. is.
-    // Then the substitution would be done in the matrix multiplication with R.
-    // So next step:
-    // - figure out how to replace backsubstitution of Fourer-Motzkin by right-side multiplication
-
-
     and UnaryOp = 
         | Negate                        
         | Abs
@@ -342,7 +316,11 @@ module Elements =
         | Leaf (IdxValue idx) -> Leaf (IdxValue (IdxExpr.subst repl idx))
         | Leaf (Argument (name, idxs)) -> Leaf (Argument (name, IdxExprs.subst repl idxs))
         | Leaf (op) -> Leaf (op)
+        | Unary (Sum (idx, lows, highs), a) ->
+            Unary (Sum (idx, lows |> List.map (IdxExpr.subst repl), highs |> List.map (IdxExpr.subst repl)), sub a)
         | Unary (op, a) -> Unary (op, sub a)
+        | Binary (IdxIf (idx, cmp), a, b) -> 
+            Binary (IdxIf (idx |> IdxExpr.subst repl, cmp), sub a, sub b)
         | Binary (op, a, b) -> Binary (op, sub a, sub b)
 
     let rec evalExpr (argEnv: Map<string, Tensor<float>>) idxEnv expr =
@@ -358,26 +336,38 @@ module Elements =
                 arg.[idxs]
 
         | Unary (op, a) ->
-            let av = subEval a
             match op with
-            | Negate -> -av 
-            | Abs -> abs av 
-            | Sgn -> Operators.sgn av
-            | Log -> log av
-            | Log10 -> log10 av
-            | Exp -> exp av
-            | Tanh -> tanh av
-            | Sqrt -> sqrt av
+            | Negate -> -(subEval a) 
+            | Abs -> abs (subEval a) 
+            | Sgn -> Operators.sgn (subEval a)
+            | Log -> log (subEval a)
+            | Log10 -> log10 (subEval a)
+            | Exp -> exp (subEval a)
+            | Tanh -> tanh (subEval a)
+            | Sqrt -> sqrt (subEval a)
+            | Sum (sym, lows, highs) ->
+                let low = lows |> List.map (IdxExpr.eval idxEnv) |> List.max |> ceil 
+                let high = highs |> List.map (IdxExpr.eval idxEnv) |> List.min |> floor
+                seq {low .. high}
+                |> Seq.map (fun v -> evalExpr argEnv (idxEnv |> Map.add sym v) a)
+                |> Seq.sum
 
         | Binary (op, a, b) ->
-            let av, bv = subEval a, subEval b
             match op with
-            | Add -> av + bv
-            | Substract -> av - bv                
-            | Multiply -> av * bv          
-            | Divide -> av / bv           
-            | Modulo -> av % bv
-            | Power -> av ** bv
+            | Add -> (subEval a) + (subEval b)
+            | Substract -> (subEval a) - (subEval b)                
+            | Multiply -> (subEval a) * (subEval b)          
+            | Divide -> (subEval a) / (subEval b)           
+            | Modulo -> (subEval a) % (subEval b)
+            | Power -> (subEval a) ** (subEval b)
+            | IdxIf (idx, cmp) ->
+                let idxVal = idx |> IdxExpr.eval idxEnv
+                match cmp with
+                | EqualToZero when idxVal = Rat.Zero -> subEval a
+                | EqualToZero -> subEval b
+                | GreaterOrEqualToZero when idxVal >= Rat.Zero -> subEval a
+                | GreaterOrEqualToZero -> subEval b
+
 
     let evalFunc argEnv (func: ElemFunc) =
         let fv = HostTensor.zeros func.Shape
@@ -408,6 +398,7 @@ module Elements =
             | Exp -> d * exp a |> rds a
             | Tanh -> d * (1.0 - (tanh a)**2.0) |> rds a
             | Sqrt -> d * (1.0 / (2.0 * sqrtt a)) |> rds a
+            | Sum _ -> failwith "sum derivative not implemented yet"
         | Binary (op, a, b) ->
             let (.+) da db =
                 let aDeriv = rds a da
@@ -423,6 +414,8 @@ module Elements =
             | Divide -> d |> rds (a * b ** -1.0)
             | Modulo -> failwith "buggy"
             | Power ->  (d * b * a**(b - 1.0)) .+ (d * a**b * log a)
+            | IdxIf (idx, cmp) ->
+                (idxIf idx cmp d (scalar 0.0)) .+ (idxIf idx cmp (scalar 0.0) d)
 
 
     let derivFunc (fn: ElemFunc) =
