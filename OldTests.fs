@@ -303,24 +303,34 @@ let testElements1() =
     let expr = Elements.arg "x" [i; j] + 2.0 * (Elements.arg "y" [j; j] * (Elements.arg "z" [k])**3.0)
     let func = Elements.func "f" dimNames dimSizes argShapes expr
 
-    printfn "Function:\n%A" func
-    let argEnv = Map ["x", xv; "y", yv; "z", zv]
-    printfn "Ranges:\n%A" dimSizes
-    let fv = Elements.evalFunc argEnv func
-
-    //printfn "x=\n%A" xv
-    //printfn "y=\n%A" yv
-    //printfn "z=\n%A" zv
-    //printfn "f=\n%A" fv
-    
+    printfn "%A" func
+    printfn "Ranges: %A" dimSizes
+  
     // derivative expression
     let dfExpr = Elements.derivExpr func.Expr (Elements.arg "dIn" [])
-    printfn "df:\n%A" dfExpr
+    //printfn "df:\n%A" dfExpr
 
     // derivative functions
     let dFns = Elements.derivFunc func
-    printfn "dFns:\n%A" dFns
+    printfn "dFns:" 
+    for KeyValue(_, dFn) in dFns do
+        printfn "%A" dFn
+    printfn ""
 
+    // evaluate
+    printfn "Evaluating:"
+    printfn "x=\n%A" xv
+    printfn "y=\n%A" yv
+    printfn "z=\n%A" zv
+
+    let argEnv = Map ["x", xv; "y", yv; "z", zv]
+    let fv = Elements.evalFunc argEnv func
+    printfn "f=\n%A" fv
+
+    let argEnv = argEnv |> Map.add "df" fv
+    for KeyValue(name, dFn) in dFns do
+        let dFnv = Elements.evalFunc argEnv dFn
+        printfn "%s=\n%A" name dFnv
 
 
 
