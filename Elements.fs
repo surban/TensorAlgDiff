@@ -56,7 +56,12 @@ module Elements =
                 match f |> Map.tryFind "1" with
                 | Some v -> v
                 | None -> Rat.Zero
+            static member ofSeq indices values =
+                Seq.zip indices values
+                |> Map.ofSeq
+                |> IdxExpr
 
+    /// Matches an index expression that consists only of a constant.
     let (|ConstIdxExpr|_|) (IdxExpr f) =
         let f = f |> Map.toList |> List.filter (fun (_, v) -> v <> Rat.Zero)
         match f with
@@ -64,6 +69,7 @@ module Elements =
         | [i, v] when i = "1" -> Some v
         | _ -> None
 
+    /// Matches an index expression that consists only of a single (non-constant) factor.
     let (|SingleIdxExpr|_|) (IdxExpr f) =
         let f = f |> Map.toList |> List.filter (fun (_, v) -> v <> Rat.Zero)
         match f with
@@ -135,17 +141,18 @@ module Elements =
     and [<StructuredFormatDisplay("{Pretty}")>]
         ElemFunc = {
             Name:       string
-            DimName:    string list
+            DimNames:    string list
             DimSize:    Map<string, int64>
             Expr:       ElemExpr
-            ArgShape:   Map<string, int64 list>
+            ArgShapes:   Map<string, int64 list>
         } with
             member this.Pretty =
-                let dims = this.DimName |> String.concat "; "
+                let dims = this.DimNames |> String.concat "; "
                 sprintf "%s[%s] = %A" this.Name dims this.Expr
             member this.Shape = 
-                this.DimName |> List.map (fun d -> this.DimSize.[d])
+                this.DimNames |> List.map (fun d -> this.DimSize.[d])
 
+    /// Returns all arguments occuring in the given expression/
     let rec extractArgs expr =
         match expr with
         | Leaf (Argument (name, idxs)) -> Set [name, idxs]
@@ -153,6 +160,7 @@ module Elements =
         | Unary (_, a) -> extractArgs a
         | Binary (_, a, b) -> Set.union (extractArgs a) (extractArgs b)
 
+    /// Builds a function.
     let func name dimNames dimSizes argShapes expr =
         for (argName, argIdx) in extractArgs expr do
             match argShapes |> Map.tryFind argName with
@@ -160,7 +168,7 @@ module Elements =
                 failwithf "shape dimensionality mismatch for argument %s" argName
             | Some shp -> ()
             | None -> failwithf "no shape specified for argument %s" argName                
-        {Name=name; DimName=dimNames; DimSize=dimSizes; Expr=expr; ArgShape=argShapes}
+        {Name=name; DimNames=dimNames; DimSize=dimSizes; Expr=expr; ArgShapes=argShapes}
 
     /// a constant value given by a ConstSpec
     let scalar v = Leaf (Const v) 
@@ -298,9 +306,11 @@ module Elements =
     /// constant index value
     let idxConst v = IdxExpr.factor "1" v
 
+    /// Summation over an index.
     let sum idx lows highs a =
         Unary (Sum (idx, lows, highs), a)
 
+    /// Expression conditioned on index values.
     let idxIf idx cmp thenExpr elseExpr =
         match cmp, idx with
         | EqualToZero, ConstIdxExpr v when v = Rat.Zero -> thenExpr
@@ -309,7 +319,7 @@ module Elements =
         | GreaterOrEqualToZero, ConstIdxExpr v -> elseExpr
         | _ -> Binary (IdxIf (idx, cmp), thenExpr, elseExpr)
 
-    /// substitutes the specified size symbols with their replacements 
+    /// Substitutes the specified size symbols with their replacements.
     let rec substIdx repl expr = 
         let sub = substIdx repl
         match expr with
@@ -323,6 +333,7 @@ module Elements =
             Binary (IdxIf (idx |> IdxExpr.subst repl, cmp), sub a, sub b)
         | Binary (op, a, b) -> Binary (op, sub a, sub b)
 
+    /// Evaluates the given expression.
     let rec evalExpr (argEnv: Map<string, Tensor<float>>) idxEnv expr =
         let subEval = evalExpr argEnv idxEnv
         match expr with
@@ -368,17 +379,17 @@ module Elements =
                 | GreaterOrEqualToZero when idxVal >= Rat.Zero -> subEval a
                 | GreaterOrEqualToZero -> subEval b
 
-
+    /// Evaluates the given function.
     let evalFunc argEnv (func: ElemFunc) =
         let fv = HostTensor.zeros func.Shape
         for pos in TensorLayout.allIdxOfShape func.Shape do
-            //printfn "pos is %A" pos
             let idxEnv =
-                List.zip pos func.DimName
+                List.zip pos func.DimNames
                 |> List.fold (fun env (p, name) -> env |> Map.add name (Rat p)) Map.empty
             fv.[pos] <- evalExpr argEnv idxEnv func.Expr
         fv
 
+    /// Calculates the derivative expression given the incoming derivative dExpr.
     let rec derivExpr expr dExpr = 
         let d = dExpr        
         let rds = derivExpr
@@ -418,172 +429,115 @@ module Elements =
                 (idxIf idx cmp d (scalar 0.0)) .+ (idxIf idx cmp (scalar 0.0) d)
 
 
-    let derivFunc (fn: ElemFunc) =
-
+    /// Calculates the derivative functions of y w.r.t. all of its arguments.
+    let derivFunc (y: ElemFunc) =
         // get dimension names and add constant bias dimension
-        let funcIdxNames1 = fn.DimName @ ["1"]
-        let funcIdxRngs1 = (fn.Shape |> List.map (fun size -> 0L, size-1L)) @ [1L, 1L]
+        let yIdxNames1 = y.DimNames @ ["1"]
+        let yIdxRngs1 = (y.Shape |> List.map (fun size -> 0L, size-1L)) @ [1L, 1L]
+        let yLows1, yHighs1 = List.unzip yIdxRngs1
+        let yLows1 = yLows1 |> HostTensor.ofList |> Tensor.convert<Rat>
+        let yHighs1 = yHighs1 |> HostTensor.ofList |> Tensor.convert<Rat>            
 
-        // incoming derivative w.r.t. function
-        let dExprArgName = sprintf "d%s" fn.Name
-        let dExpr = arg dExprArgName (fn.DimName |> List.map (fun dim -> IdxExpr.factor dim Rat.One))
-        let dArgShapes = fn.ArgShape |> Map.add dExprArgName fn.Shape
+        // incoming derivative dy w.r.t. function y
+        let dyArgName = sprintf "d%s" y.Name
+        let dy = arg dyArgName (y.DimNames |> List.map (fun d -> IdxExpr.factor d Rat.One))
+        let argShapes = y.ArgShapes |> Map.add dyArgName y.Shape
 
-        let processArg argName (IdxExprs argIdxs) dArg =
-            // name the indices of the argument
-            let argIdxNames = argIdxs |> List.mapi (fun i _ -> sprintf "d%s_%d" argName i)
-            let argIdxSizes = argIdxNames |> List.mapi (fun i name -> name, fn.ArgShape.[argName].[i]) |> Map.ofList
+        // Calculate derivative expressions w.r.t. all indiced arguments.
+        let dxs = derivExpr y.Expr dy            
 
-            // add "1" dimension to indices
-            let argIdxs1, argIdxNames1 = argIdxs @ [IdxExpr.one], argIdxNames @ ["1"]
+        // Perform index substitution and nullspace summation on the derivatives of all arguments.
+        let processDeriv xName (IdxExprs xIdxs) dx =
+            // name the argument and its indices
+            let dxName = sprintf "d%s" xName
+            let dxIdxNames = xIdxs |> List.mapi (fun i _ -> sprintf "%s_%d" dxName i)
+            let dxIdxSizes = dxIdxNames |> List.mapi (fun i name -> name, y.ArgShapes.[xName].[i]) |> Map.ofList
 
-            // Construct matrix mapping from function indices to argument indices: argIdxMat[argDim, funcDim] 
-            let argIdxMat = IdxExprs.toMatrix funcIdxNames1 (IdxExprs argIdxs1)
+            // Add "1" dimension to indices for constant terms.
+            let dxIdxs1, dxIdxNames1 = xIdxs @ [IdxExpr.one], dxIdxNames @ ["1"]
 
-            // Compute inverse of it.
-            let ci = Consumers.compute (Tensor.convert<bigint> argIdxMat) funcIdxRngs1
-
-            let toIdxExpr (names: string list) (facs: Rat list) =
-                List.zip names facs
-                |> List.fold (fun expr (name, fac) -> expr + IdxExpr.factor name fac) IdxExpr.zero
-
-            let limitIdxExprs (rng: FourierMotzkin.Range) (substSyms: string list) =
-                let lows, highs = List.unzip ci.Ranges
-                let lows = lows |> HostTensor.ofList |> Tensor.convert<Rat>
-                let highs = highs |> HostTensor.ofList |> Tensor.convert<Rat>            
-                let bLowConst = rng.BLow .* Tensor.concat 0 [lows; -highs] |> HostTensor.toList
-                let bHighConst = rng.BHigh .* Tensor.concat 0 [lows; -highs] |> HostTensor.toList
-                let bLowMat = rng.BLow .* Tensor.concat 0 [-ci.YToX; ci.YToX] |> HostTensor.toList2D
-                let bHighMat = rng.BHigh .* Tensor.concat 0 [-ci.YToX; ci.YToX] |> HostTensor.toList2D
-                let sLowMat = rng.SLow |> HostTensor.toList2D
-                let sHighMat = rng.SHigh |> HostTensor.toList2D
-                // now make it an index expression                
-                let lows = 
-                    List.zip3 bLowConst bLowMat sLowMat
-                    |> List.map (fun (c, bFacs, sFacs) -> 
-                        c * IdxExpr.one + toIdxExpr argIdxNames1 bFacs + toIdxExpr substSyms sFacs)
-                let highs = 
-                    List.zip3 bHighConst bHighMat sHighMat
-                    |> List.map (fun (c, bFacs, sFacs) -> 
-                        c * IdxExpr.one + toIdxExpr argIdxNames1 bFacs + toIdxExpr substSyms sFacs)
-                lows, highs
-
-            let feasibilityIdxExpr (fs: Tensor<Rat>) =
-                let lows, highs = List.unzip ci.Ranges
-                let lows = lows |> HostTensor.ofList |> Tensor.convert<Rat>
-                let highs = highs |> HostTensor.ofList |> Tensor.convert<Rat>            
-                let bConst = fs .* Tensor.concat 0 [lows; -highs] |> HostTensor.toList
-                let bMat = fs .* Tensor.concat 0 [-ci.YToX; ci.YToX] |> HostTensor.toList2D
-                let allConstrs = 
-                    List.zip bConst bMat
-                    |> List.map (fun (c, bFacs) -> c * IdxExpr.one + toIdxExpr argIdxNames1 bFacs)
-                let filteredConstrs =
-                    allConstrs
-                    |> List.filter (fun ie ->
-                        let cv = IdxExpr.constVal ie
-                        match ie - cv * IdxExpr.one with // cv + iv * "i" <= 0       
-                        // cv - "i" <= 0 => cv <= "i" => always true for cv <= 0 because "i" >= 0                                         
-                        | SingleIdxExpr (i, iv) when iv = Rat.MinusOne && cv <= Rat.Zero -> false
-                        // cv + "i" <= 0 => "i" <= -cv => always true for -cv >= size_i-1 because "i" <= size_i-1
-                        | SingleIdxExpr (i, iv) when iv = Rat.One && -cv >= Rat (argIdxSizes.[i]-1L) -> false
-                        | _ -> true)                             
-                filteredConstrs                   
-
-            let solvabilityIdxExpr (s: Tensor<bigint>) =
-                s 
-                |> Tensor.convert<Rat> 
-                |> HostTensor.toList2D
-                |> List.map (fun facs -> toIdxExpr argIdxNames1 facs)                                    
-
+            // Construct matrix mapping from function indices to argument indices yToX[xDim, yDim] and compute
+            // the generalized inverse of it.
+            let yToX = IdxExprs.toMatrix yIdxNames1 (IdxExprs dxIdxs1) |> Tensor.convert<bigint>
+            let inv = Consumers.compute yToX yIdxRngs1
+                              
+            // Perform summation over nullspace.
             let rec buildSum summand sols sumSyms =
                 match sols with
                 | FourierMotzkin.Feasibility fs :: rSols ->
-                    (buildSum summand rSols sumSyms, feasibilityIdxExpr fs)
-                    ||> List.fold (fun ifTrue fsIdx ->
-                        idxIf -fsIdx GreaterOrEqualToZero ifTrue (scalar 0.0))                    
+                    let summand = buildSum summand rSols sumSyms
+                    // System is feasible if fs .* b <= 0,
+                    // where b = [yLows - YToX .* y; -yHighs + YToX .* y].
+                    let bVec = fs .* Tensor.concat 0 [yLows1; -yHighs1] |> HostTensor.toList
+                    let bMat = fs .* Tensor.concat 0 [-inv.YToX; inv.YToX] |> HostTensor.toList2D
+                    let fsIdxs = 
+                        List.zip bVec bMat
+                        |> List.map (fun (c, bFacs) -> c * IdxExpr.one + IdxExpr.ofSeq dxIdxNames1 bFacs)
+                        |> List.filter (fun ie ->
+                            // Filter inequalaties that are always true.
+                            // Each inequality of the form cv + iv * "i" <= 0 is considered.
+                            let cv = IdxExpr.constVal ie
+                            match ie - cv * IdxExpr.one with 
+                            // cv - "i" <= 0 => cv <= "i" => always true for cv <= 0 because "i" >= 0                                         
+                            | SingleIdxExpr (i, iv) when iv = Rat.MinusOne && cv <= Rat.Zero -> false
+                            // cv + "i" <= 0 => "i" <= -cv => always true for -cv >= size_i-1 because "i" <= size_i-1
+                            | SingleIdxExpr (i, iv) when iv = Rat.One && -cv >= Rat (dxIdxSizes.[i]-1L) -> false
+                            | _ -> true)         
+                    (summand, fsIdxs) ||> List.fold (fun s fsIdx -> idxIf -fsIdx GreaterOrEqualToZero s (scalar 0.0))                    
                 | FourierMotzkin.Range rng :: rSols ->
-                    let lows, highs = limitIdxExprs rng sumSyms
-                    let sumSym = sprintf "d%s_z%d" argName rng.Idx
+                    let sumSym = sprintf "%s_z%d" dxName rng.Idx
                     let summand = buildSum summand rSols (sumSym::sumSyms)
+                    // The limits are given by 
+                    // Low limits:  x[Idx] >= BLow  .* b - SLow  .* x.[Idx+1L..]
+                    // High limits: x[Idx] <= BHigh .* b - SHigh .* x.[Idx+1L..]
+                    // where b = [yLows - YToX .* y; -yHighs + YToX .* y].              
+                    let bVec = Tensor.concat 0 [yLows1; -yHighs1]
+                    let bMat = Tensor.concat 0 [-inv.YToX; inv.YToX]
+                    let bLowVec = rng.BLow .* bVec |> HostTensor.toList
+                    let bHighVec = rng.BHigh .* bVec |> HostTensor.toList
+                    let bLowMat = rng.BLow .* bMat |> HostTensor.toList2D
+                    let bHighMat = rng.BHigh .* bMat |> HostTensor.toList2D
+                    let sLowMat = rng.SLow |> HostTensor.toList2D
+                    let sHighMat = rng.SHigh |> HostTensor.toList2D
+                    let idxExpr bVec bMat sMat = 
+                        List.zip3 bVec bMat sMat
+                        |> List.map (fun (c, bFacs, sFacs) -> 
+                            c * IdxExpr.one + IdxExpr.ofSeq dxIdxNames1 bFacs + IdxExpr.ofSeq sumSyms sFacs)
+                    let lows, highs = idxExpr bLowVec bLowMat sLowMat, idxExpr bHighVec bHighMat sHighMat
                     sum sumSym lows highs summand
                 | [] -> 
-                    let yToX = ci.YToX |> HostTensor.toList2D
-                    let zToX = ci.Nullspace |> Tensor.convert<Rat> |> HostTensor.toList2D
+                    let yToX = inv.YToX |> HostTensor.toList2D
+                    let zToX = inv.Nullspace |> Tensor.convert<Rat> |> HostTensor.toList2D
                     let subs =
-                        List.zip3 funcIdxNames1 yToX zToX
+                        List.zip3 yIdxNames1 yToX zToX
                         |> List.map (fun (name, argFacs, nsFacs) -> 
-                            name, toIdxExpr argIdxNames1 argFacs + toIdxExpr sumSyms nsFacs)
+                            name, IdxExpr.ofSeq dxIdxNames1 argFacs + IdxExpr.ofSeq sumSyms nsFacs)
                         |> Map.ofList
                         |> Map.add "1" IdxExpr.one
                     substIdx subs summand 
+            let dxSummed = buildSum dx inv.ConstraintsLeft []
 
-            let dArgExpr = buildSum dArg ci.ConstraintsLeft []
-            //printfn "arg: %s  nullspace:%A" argName ci.Nullspace
+            // Check solvability.
+            let solIdxs = 
+                inv.Solvability 
+                |> Tensor.convert<Rat> 
+                |> HostTensor.toList2D
+                |> List.map (fun sFacs -> IdxExpr.ofSeq dxIdxNames1 sFacs)
+            let dxChecked = 
+                (dxSummed, solIdxs) ||> List.fold (fun s solIdx -> idxIf solIdx EqualToZero s (scalar 0.0))
 
-            // solvability
-            let dArgExpr = 
-                (dArgExpr, solvabilityIdxExpr ci.Solvability)
-                ||> List.fold (fun ifTrue solIdx -> 
-                    idxIf solIdx EqualToZero dArgExpr (scalar 0.0))
+            // Build derivative function.
+            func dxName dxIdxNames dxIdxSizes argShapes dxChecked
 
-            // build function
-            func (sprintf "d%s" argName) argIdxNames argIdxSizes dArgShapes dArgExpr
-
-        // calculate derivative expressions w.r.t. all arguments
-        let dArgIdxExprs = derivExpr fn.Expr dExpr
-            
-        // perform index substitution on the derivatives of all arguments
-        let dArgIdxFns =
-            dArgIdxExprs
-            |> Map.toList
-            |> List.map (fun ((argName, argIdxs), dArg) -> processArg argName argIdxs dArg)
-
-        // sum by argument
-        let dArgFns = 
-            dArgIdxFns
+        // Perform index substitution on the derivatives of all arguments and sum by argument.
+        let dxFns = 
+            dxs 
+            |> Map.toList 
+            |> List.map (fun ((xName, xIdxs), dx) -> processDeriv xName xIdxs dx)
             |> List.groupBy (fun ef -> ef.Name)
-            |> List.map (fun (dArgName, dArgs) -> 
-                dArgName, dArgs |> List.reduce (fun a {Expr=bExpr} -> {a with Expr=a.Expr + bExpr}))
+            |> List.map (fun (dxName, dxs) -> 
+                dxName, dxs |> List.reduce (fun a {Expr=bExpr} -> {a with Expr=a.Expr + bExpr}))
             |> Map.ofList
 
-        dArgFns
-
-
-
-    // /// checks if the arguments' shapes are compatible with the result shape and that the types match
-    // let checkCompatibility (expr: ElemExpr) (argShapes: ShapeSpecT list) (argTypes: TypeNameT list) 
-    //         (resShape: ShapeSpecT) =
-
-    //     // check number of arguments
-    //     let nArgs = List.length argShapes
-    //     if argTypes.Length <> nArgs then
-    //         failwith "argShapes and argTypes must be of same length"
-    //     let nReqArgs = requiredNumberOfArgs expr       
-    //     if nReqArgs > nArgs then
-    //         failwithf "the element expression requires at least %d arguments but only %d arguments were specified"
-    //             nReqArgs nArgs
-
-    //     // check dimensionality of arguments
-    //     let rec check expr =
-    //         match expr with
-    //         | Leaf (ArgElement ((Arg n, idx), tn)) ->
-    //             if not (0 <= n && n < nArgs) then
-    //                 failwithf "the argument with zero-based index %d used in the element \
-    //                            expression does not exist" n
-    //             let idxDim = ShapeSpec.nDim idx
-    //             let argDim = ShapeSpec.nDim argShapes.[n]
-    //             if idxDim <> argDim then
-    //                 failwithf 
-    //                     "the argument with zero-based index %d has %d dimensions but was used  \
-    //                      with %d dimensions in the element expression" n argDim idxDim
-    //             let argType = argTypes.[n]
-    //             if argType <> tn then
-    //                 failwithf 
-    //                     "the argument with zero-based index %d has type %A but was used  \
-    //                      as type %A in the element expression" n argType.Type tn.Type
-    //         | Leaf _ -> ()
-
-    //         | Unary (_, a) -> check a
-    //         | Binary (_, a, b) -> check a; check b
-    //     check expr
+        dxFns
 
