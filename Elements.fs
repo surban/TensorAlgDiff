@@ -543,10 +543,10 @@ module Elements =
         let dxFns = 
             dxs 
             |> Map.toList 
-            |> List.map (fun ((xName, xIdxs), dx) -> processDeriv xName xIdxs dx)
-            |> List.groupBy (fun ef -> ef.Name)
-            |> List.map (fun (dxName, dxs) -> 
-                dxName, dxs |> List.reduce (fun a {Expr=bExpr} -> {a with Expr=a.Expr + bExpr}))
+            |> List.map (fun ((xName, xIdxs), dx) -> xName, processDeriv xName xIdxs dx)
+            |> List.groupBy fst
+            |> List.map (fun (xName, dxs) -> 
+                xName, dxs |> List.map snd |> List.reduce (fun a {Expr=bExpr} -> {a with Expr=a.Expr + bExpr}))
             |> Map.ofList
 
         dxFns
