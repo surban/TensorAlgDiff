@@ -1,7 +1,8 @@
 namespace Elements
 
-open Tensor
 open System
+open Tensor
+open Tensor.Algorithms
 
 
 /// element expression
@@ -456,20 +457,29 @@ module Elements =
             // Add "1" dimension to indices for constant terms.
             let dxIdxs1, dxIdxNames1 = xIdxs @ [IdxExpr.one], dxIdxNames @ ["1"]
 
-            // Construct matrix mapping from function indices to argument indices yToX[xDim, yDim] and compute
-            // the generalized inverse of it.
+            // Construct matrix mapping from function indices to argument indices yToX[xDim, yDim].            
             let yToX = IdxExprs.toMatrix yIdxNames1 (IdxExprs dxIdxs1) |> Tensor.convert<bigint>
-            let inv = Consumers.compute yToX yIdxRngs1
-                              
+
+            // Compute the generalized inverse of it and the summation range constraints:
+            // y_i = XToY_i* .* x + Nullspace_i* .* z >= low_i
+            // y_i = XToY_i* .* x + Nullspace_i* .* z <= high_i
+            // Thus: Nullspace_i* .* z >=  low_i  - XToY_i* .* x
+            //      -Nullspace_i* .* z >= -high_i + XToY_i* .* x
+            let xToY, xSolvability, yNull = LinAlg.integerInverse yToX
+            let sumConstr = 
+                Tensor.concat 0 [yNull; -yNull] 
+                |> Tensor.convert<Rat>
+                |> FourierMotzkin.solve
+
             // Perform summation over nullspace.
             let rec buildSum summand sols sumSyms =
                 match sols with
                 | FourierMotzkin.Feasibility fs :: rSols ->
                     let summand = buildSum summand rSols sumSyms
                     // System is feasible if fs .* b <= 0,
-                    // where b = [yLows - YToX .* y; -yHighs + YToX .* y].
+                    // where b = [yLows - XToY .* x; -yHighs + XToY .* y].
                     let bVec = fs .* Tensor.concat 0 [yLows1; -yHighs1] |> HostTensor.toList
-                    let bMat = fs .* Tensor.concat 0 [-inv.YToX; inv.YToX] |> HostTensor.toList2D
+                    let bMat = fs .* Tensor.concat 0 [-xToY; xToY] |> HostTensor.toList2D
                     let fsIdxs = 
                         List.zip bVec bMat
                         |> List.map (fun (c, bFacs) -> c * IdxExpr.one + IdxExpr.ofSeq dxIdxNames1 bFacs)
@@ -490,9 +500,9 @@ module Elements =
                     // The limits are given by 
                     // Low limits:  x[Idx] >= BLow  .* b - SLow  .* x.[Idx+1L..]
                     // High limits: x[Idx] <= BHigh .* b - SHigh .* x.[Idx+1L..]
-                    // where b = [yLows - YToX .* y; -yHighs + YToX .* y].              
+                    // where b = [yLows - XToY .* x; -yHighs + XToY .* y].              
                     let bVec = Tensor.concat 0 [yLows1; -yHighs1]
-                    let bMat = Tensor.concat 0 [-inv.YToX; inv.YToX]
+                    let bMat = Tensor.concat 0 [-xToY; xToY]
                     let bLowVec = rng.BLow .* bVec |> HostTensor.toList
                     let bHighVec = rng.BHigh .* bVec |> HostTensor.toList
                     let bLowMat = rng.BLow .* bMat |> HostTensor.toList2D
@@ -506,20 +516,20 @@ module Elements =
                     let lows, highs = idxExpr bLowVec bLowMat sLowMat, idxExpr bHighVec bHighMat sHighMat
                     sum sumSym lows highs summand
                 | [] -> 
-                    let yToX = inv.YToX |> HostTensor.toList2D
-                    let zToX = inv.Nullspace |> Tensor.convert<Rat> |> HostTensor.toList2D
+                    let xToY = xToY |> HostTensor.toList2D
+                    let zToY = yNull |> Tensor.convert<Rat> |> HostTensor.toList2D
                     let subs =
-                        List.zip3 yIdxNames1 yToX zToX
+                        List.zip3 yIdxNames1 xToY zToY
                         |> List.map (fun (name, argFacs, nsFacs) -> 
                             name, IdxExpr.ofSeq dxIdxNames1 argFacs + IdxExpr.ofSeq sumSyms nsFacs)
                         |> Map.ofList
                         |> Map.add "1" IdxExpr.one
                     substIdx subs summand 
-            let dxSummed = buildSum dx inv.ConstraintsLeft []
+            let dxSummed = buildSum dx sumConstr []
 
             // Check solvability.
             let solIdxs = 
-                inv.Solvability 
+                xSolvability 
                 |> Tensor.convert<Rat> 
                 |> HostTensor.toList2D
                 |> List.map (fun sFacs -> IdxExpr.ofSeq dxIdxNames1 sFacs)

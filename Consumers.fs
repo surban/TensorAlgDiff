@@ -5,22 +5,8 @@ open Tensor
 open Tensor.Algorithms
 
 
-/// Modulo operator returning always non-negative values.
-let inline (%%) (x: ^T) (d: ^T) : ^T =
-    let r = x % d
-    if r < LanguagePrimitives.GenericZero then d + r
-    else r
-
-let gcd a b =
-    BigInteger.GreatestCommonDivisor (a, b)
-
-let lcm a b =
-    (a * b) / gcd a b |> abs
-
-
 /// Tuple of (low, high) range.
 type Range = int64 * int64
-
 
 /// Necessary information to compute all xs consuming an y.
 /// The xs are specified in terms of a base point dependant on y and a nullspace.
@@ -46,8 +32,6 @@ type ConsumerInfo = {
 let compute (m: Tensor<bigint>) (rngs: Range list) =
     let ny, nx = m.Shape.[0], m.Shape.[1]
     if List.length rngs <> int nx then failwith "incorrect range count"
-    let xLow = rngs |> List.map fst |> HostTensor.ofList
-    let xHigh = rngs |> List.map snd |> HostTensor.ofList
 
     /// Invert matrix M over integers, giving inverse I, solvability S and nullspace N.
     let I, S, N = LinAlg.integerInverse m
