@@ -305,6 +305,7 @@ let testElements1() =
 
     printfn "Function:\n%A" func
     let argEnv = Map ["x", xv; "y", yv; "z", zv]
+    printfn "Ranges:\n%A" dimSizes
     let fv = Elements.evalFunc argEnv func
 
     //printfn "x=\n%A" xv

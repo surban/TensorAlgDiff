@@ -26,7 +26,7 @@ type Range = int64 * int64
 /// The xs are specified in terms of a base point dependant on y and a nullspace.
 /// We have: x = YToX .* y + Nullspace .* z where z is an integer vector.
 type ConsumerInfo = {
-    /// Solvability .* Y = 0 for system to be solvable
+    /// Solvability .* y = 0 for system to be solvable
     Solvability:        Tensor<bigint>
     /// Matrix mapping y to a particular solution x.
     YToX:               Tensor<Rat>

@@ -52,6 +52,24 @@ module Elements =
                 f |> Map.fold (fun s i v -> s + v * idxEnv.[i]) Rat.Zero
             static member subst (repl: Map<string, IdxExpr>) (IdxExpr f) =
                 f |> Map.fold (fun r i v -> r + v * repl.[i]) IdxExpr.zero
+            static member constVal (IdxExpr f) =
+                match f |> Map.tryFind "1" with
+                | Some v -> v
+                | None -> Rat.Zero
+
+    let (|ConstIdxExpr|_|) (IdxExpr f) =
+        let f = f |> Map.toList |> List.filter (fun (_, v) -> v <> Rat.Zero)
+        match f with
+        | [] -> Some Rat.Zero
+        | [i, v] when i = "1" -> Some v
+        | _ -> None
+
+    let (|SingleIdxExpr|_|) (IdxExpr f) =
+        let f = f |> Map.toList |> List.filter (fun (_, v) -> v <> Rat.Zero)
+        match f with
+        | [i, v] when i <> "1" -> Some (i, v)
+        | _ -> None
+   
 
     /// Index expressions for all indicies of a tensor.
     [<StructuredFormatDisplay("{Pretty}")>]    
@@ -119,7 +137,6 @@ module Elements =
         | Tanh
         | Sqrt
         | Sum of idx:string * lows:IdxExpr list * highs:IdxExpr list
-        //| KroneckerRng of SizeSpecT * SizeSpecT * SizeSpecT
 
     and BinaryOp = 
         | Add                           
@@ -128,8 +145,12 @@ module Elements =
         | Divide                        
         | Modulo
         | Power        
-        //| IfThenElse of SizeSpecT * SizeSpecT
-        
+        | IdxIf of idx:IdxExpr * cmp:IdxComparison
+
+    and IdxComparison =
+        | EqualToZero
+        | GreaterOrEqualToZero
+
     /// an element expression
     and [<StructuredFormatDisplay("{Pretty}")>]
         ElemExpr =
@@ -236,28 +257,48 @@ module Elements =
                     | Exp -> sprintf "exp %s" aStr
                     | Tanh -> sprintf "tanh %s" aStr
                     | Sqrt -> sprintf "sqrt %s" aStr
-                    | Sum (sym, lows, highs) -> sprintf "sum:%s_%A^%A (%s)" sym lows highs aStr
+                    | Sum (sym, lows, highs) -> 
+                        let lowsStr =
+                            match lows with
+                            | [ConstIdxExpr low] -> sprintf "%A" low
+                            | [low] -> sprintf "(%A)" low
+                            | _ -> sprintf "(max %A)" lows
+                        let highsStr =
+                            match highs with
+                            | [ConstIdxExpr high] -> sprintf "%A" high
+                            | [high] -> sprintf "(%A)" high
+                            | _ -> sprintf "(min %A)" highs
+                        sprintf "sum{%s}_%s^%s (%s)" sym lowsStr highsStr aStr
                 myStr, myPri
                 
             | Binary(op, a, b) -> 
-                let mySym, myPri =
-                    match op with
-                    | Add -> "+", 1
-                    | Substract -> "-", 1
-                    | Multiply -> "*", 2
-                    | Divide -> "/", 2
-                    | Modulo -> "%", 2
-                    | Power -> "**", 5
                 let aStr, aPri = a.PrettyAndPriority
-                let bStr, bPri = b.PrettyAndPriority
-                let aStr =
-                    if myPri > aPri then sprintf "(%s)" aStr
-                    else aStr
-                let bStr =
-                    if myPri > bPri then sprintf "(%s)" bStr
-                    else bStr
-                let myStr = sprintf "%s %s %s" aStr mySym bStr
-                myStr, myPri            
+                let bStr, bPri = b.PrettyAndPriority            
+                match op with
+                | Add | Substract | Multiply | Divide | Modulo | Power ->
+                    let mySym, myPri =
+                        match op with
+                        | Add -> "+", 1
+                        | Substract -> "-", 1
+                        | Multiply -> "*", 2
+                        | Divide -> "/", 2
+                        | Modulo -> "%", 2
+                        | Power -> "**", 5
+                        | _ -> failwith "unexpected"
+                    let aStr =
+                        if myPri > aPri then sprintf "(%s)" aStr
+                        else aStr
+                    let bStr =
+                        if myPri > bPri then sprintf "(%s)" bStr
+                        else bStr
+                    let myStr = sprintf "%s %s %s" aStr mySym bStr
+                    myStr, myPri            
+                | IdxIf (idx, cmp) ->
+                    let cmpStr =
+                        match cmp with
+                        | GreaterOrEqualToZero -> ">= 0"
+                        | EqualToZero -> "= 0"
+                    sprintf "if {%A %s} then (%s) else (%s)" idx cmpStr aStr bStr, 0
 
         member this.Pretty = this.PrettyAndPriority |> fst
 
@@ -285,6 +326,14 @@ module Elements =
 
     let sum idx lows highs a =
         Unary (Sum (idx, lows, highs), a)
+
+    let idxIf idx cmp thenExpr elseExpr =
+        match cmp, idx with
+        | EqualToZero, ConstIdxExpr v when v = Rat.Zero -> thenExpr
+        | EqualToZero, ConstIdxExpr v -> elseExpr
+        | GreaterOrEqualToZero, ConstIdxExpr v when v >= Rat.Zero -> thenExpr
+        | GreaterOrEqualToZero, ConstIdxExpr v -> elseExpr
+        | _ -> Binary (IdxIf (idx, cmp), thenExpr, elseExpr)
 
     /// substitutes the specified size symbols with their replacements 
     let rec substIdx repl expr = 
@@ -340,7 +389,7 @@ module Elements =
             fv.[pos] <- evalExpr argEnv idxEnv func.Expr
         fv
 
-    let rec derivExpr expr dExpr =            
+    let rec derivExpr expr dExpr = 
         let d = dExpr        
         let rds = derivExpr
         match expr with
@@ -380,7 +429,7 @@ module Elements =
 
         // get dimension names and add constant bias dimension
         let funcIdxNames1 = fn.DimName @ ["1"]
-        let funcIdxRngs1 = (fn.Shape |> List.map (fun high -> 0L, high)) @ [1L, 1L]
+        let funcIdxRngs1 = (fn.Shape |> List.map (fun size -> 0L, size-1L)) @ [1L, 1L]
 
         // incoming derivative w.r.t. function
         let dExprArgName = sprintf "d%s" fn.Name
@@ -393,8 +442,7 @@ module Elements =
             let argIdxSizes = argIdxNames |> List.mapi (fun i name -> name, fn.ArgShape.[argName].[i]) |> Map.ofList
 
             // add "1" dimension to indices
-            let argIdxs1 = argIdxs @ [IdxExpr.one]
-            let argIdxNames1 = argIdxNames @ ["1"]
+            let argIdxs1, argIdxNames1 = argIdxs @ [IdxExpr.one], argIdxNames @ ["1"]
 
             // Construct matrix mapping from function indices to argument indices: argIdxMat[argDim, funcDim] 
             let argIdxMat = IdxExprs.toMatrix funcIdxNames1 (IdxExprs argIdxs1)
@@ -402,21 +450,9 @@ module Elements =
             // Compute inverse of it.
             let ci = Consumers.compute (Tensor.convert<bigint> argIdxMat) funcIdxRngs1
 
-            // For now assume 1:1 mapping.
-            // Get matrix mapping from argument indices to function indices: funcIdxMat[funcDim, argDim] 
-            let funcIdxMat = ci.YToX |> HostTensor.toList2D
-
             let toIdxExpr (names: string list) (facs: Rat list) =
                 List.zip names facs
                 |> List.fold (fun expr (name, fac) -> expr + IdxExpr.factor name fac) IdxExpr.zero
-
-            // Substitute function indices with argument indices in derivative.
-            let subs =
-                List.zip funcIdxNames1 funcIdxMat
-                |> List.map (fun (name, argFacs) -> name, toIdxExpr argIdxNames1 argFacs)
-                |> Map.ofList
-                |> Map.add "1" IdxExpr.one
-            let dArgExpr = substIdx subs dArg 
 
             let limitIdxExprs (rng: FourierMotzkin.Range) (substSyms: string list) =
                 let lows, highs = List.unzip ci.Ranges
@@ -439,21 +475,63 @@ module Elements =
                         c * IdxExpr.one + toIdxExpr argIdxNames1 bFacs + toIdxExpr substSyms sFacs)
                 lows, highs
 
+            let feasibilityIdxExpr (fs: Tensor<Rat>) =
+                let lows, highs = List.unzip ci.Ranges
+                let lows = lows |> HostTensor.ofList |> Tensor.convert<Rat>
+                let highs = highs |> HostTensor.ofList |> Tensor.convert<Rat>            
+                let bConst = fs .* Tensor.concat 0 [lows; -highs] |> HostTensor.toList
+                let bMat = fs .* Tensor.concat 0 [-ci.YToX; ci.YToX] |> HostTensor.toList2D
+                let allConstrs = 
+                    List.zip bConst bMat
+                    |> List.map (fun (c, bFacs) -> c * IdxExpr.one + toIdxExpr argIdxNames1 bFacs)
+                let filteredConstrs =
+                    allConstrs
+                    |> List.filter (fun ie ->
+                        let cv = IdxExpr.constVal ie
+                        match ie - cv * IdxExpr.one with // cv + iv * "i" <= 0       
+                        // cv - "i" <= 0 => cv <= "i" => always true for cv <= 0 because "i" >= 0                                         
+                        | SingleIdxExpr (i, iv) when iv = Rat.MinusOne && cv <= Rat.Zero -> false
+                        // cv + "i" <= 0 => "i" <= -cv => always true for -cv >= size_i-1 because "i" <= size_i-1
+                        | SingleIdxExpr (i, iv) when iv = Rat.One && -cv >= Rat (argIdxSizes.[i]-1L) -> false
+                        | _ -> true)                             
+                filteredConstrs                   
+
+            let solvabilityIdxExpr (s: Tensor<bigint>) =
+                s 
+                |> Tensor.convert<Rat> 
+                |> HostTensor.toList2D
+                |> List.map (fun facs -> toIdxExpr argIdxNames1 facs)                                    
+
             let rec buildSum summand sols sumSyms =
                 match sols with
                 | FourierMotzkin.Feasibility fs :: rSols ->
-                    // TODO
-                    buildSum summand rSols sumSyms
+                    (buildSum summand rSols sumSyms, feasibilityIdxExpr fs)
+                    ||> List.fold (fun ifTrue fsIdx ->
+                        idxIf -fsIdx GreaterOrEqualToZero ifTrue (scalar 0.0))                    
                 | FourierMotzkin.Range rng :: rSols ->
                     let lows, highs = limitIdxExprs rng sumSyms
                     let sumSym = sprintf "d%s_z%d" argName rng.Idx
                     let summand = buildSum summand rSols (sumSym::sumSyms)
                     sum sumSym lows highs summand
-                | [] -> summand
+                | [] -> 
+                    let yToX = ci.YToX |> HostTensor.toList2D
+                    let zToX = ci.Nullspace |> Tensor.convert<Rat> |> HostTensor.toList2D
+                    let subs =
+                        List.zip3 funcIdxNames1 yToX zToX
+                        |> List.map (fun (name, argFacs, nsFacs) -> 
+                            name, toIdxExpr argIdxNames1 argFacs + toIdxExpr sumSyms nsFacs)
+                        |> Map.ofList
+                        |> Map.add "1" IdxExpr.one
+                    substIdx subs summand 
 
-            let dArgExpr = buildSum dArgExpr ci.ConstraintsLeft []
-
+            let dArgExpr = buildSum dArg ci.ConstraintsLeft []
             //printfn "arg: %s  nullspace:%A" argName ci.Nullspace
+
+            // solvability
+            let dArgExpr = 
+                (dArgExpr, solvabilityIdxExpr ci.Solvability)
+                ||> List.fold (fun ifTrue solIdx -> 
+                    idxIf solIdx EqualToZero dArgExpr (scalar 0.0))
 
             // build function
             func (sprintf "d%s" argName) argIdxNames argIdxSizes dArgShapes dArgExpr
@@ -515,3 +593,4 @@ module Elements =
     //         | Unary (_, a) -> check a
     //         | Binary (_, a, b) -> check a; check b
     //     check expr
+
