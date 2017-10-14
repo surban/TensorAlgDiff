@@ -67,22 +67,31 @@ type ElementsTests (output: ITestOutputHelper) =
             printfn "Derivative w.r.t. %s: %A" v dFn
             let aJac = DerivCheck.jacobianOfDerivFunc argEnv dInArg dFn
             let nJac = DerivCheck.numDerivOfFunc argEnv fn v
-            //printfn "Analytic Jacobian:\n%A" aJac
-            //printfn "Numeric Jacobian:\n%A" nJac
             if not (Tensor.almostEqual nJac aJac) then
-                printfn "Jacobian mismatch!!"
                 printfn "Analytic Jacobian:\n%A" aJac
                 printfn "Numeric Jacobian:\n%A" nJac
+                printfn "Jacobian mismatch!!"
                 failwith "Jacobian mismatch in function derivative check"
             else
+                printfn "Analytic Jacobian:\n%A" aJac
+                printfn "Numeric Jacobian:\n%A" nJac            
                 printfn "Analytic and numeric Jacobians match."
 
+    let randomDerivCheck iters (fn: Elements.ElemFunc) =
+        let rnd = System.Random 123
+        for i in 1 .. iters do
+            let argEnv =
+                fn.ArgShapes
+                |> Map.map (fun _ shp -> 
+                    rnd.SeqDouble() |> Seq.map (fun r -> 2. * r - 1.) |> HostTensor.ofSeqWithShape shp)
+            checkFuncDerivs argEnv fn            
 
     [<Fact>]
     let ``EvalTest1`` () =
         let i, iSize = Elements.pos "i", 3L
         let j, jSize = Elements.pos "j", 4L
         let k, kSize = Elements.pos "k", 5L
+
 
         let xv = HostTensor.zeros [iSize; jSize] + 1.0
         let yv = HostTensor.zeros [jSize; jSize] + 2.0
@@ -135,15 +144,16 @@ type ElementsTests (output: ITestOutputHelper) =
         let j, jSize = Elements.pos "j", 4L
         let k, kSize = Elements.pos "k", 5L
 
-        let xv = HostTensor.zeros [iSize; jSize] + 1.0
-        let yv = HostTensor.zeros [jSize; jSize] + 2.0
-        let zv = HostTensor.zeros [kSize] + 3.0
+        let rnd = System.Random 123
+        let xv = rnd.SeqDouble() |> HostTensor.ofSeqWithShape [iSize; jSize]
+        let yv = rnd.SeqDouble() |> HostTensor.ofSeqWithShape [jSize; jSize] 
+        let zv = rnd.SeqDouble() |> HostTensor.ofSeqWithShape [kSize] 
 
         let dimNames = [i.Name; j.Name; k.Name]
         let dimSizes = Map [i.Name, iSize; j.Name, jSize; k.Name, kSize]    
         let argShapes = Map ["x", xv.Shape; "y", yv.Shape; "z", zv.Shape]
 
-        let expr = Elements.arg "x" [i; j] + 2.0 * (Elements.arg "y" [j; j] * (Elements.arg "z" [k])**3.0)
+        let expr = Elements.arg "x" [i; j] ** 2.0 + 2.0 * (Elements.arg "y" [j; j] * (Elements.arg "z" [k])**3.0)
         let func = Elements.func "f" dimNames dimSizes argShapes expr
 
         printfn "x=\n%A" xv
@@ -155,4 +165,19 @@ type ElementsTests (output: ITestOutputHelper) =
 
 
             
+    [<Fact>]
+    let ``DerivCheck2`` () =
+        let i, iSize = Elements.pos "i", 3L
+        let j, jSize = Elements.pos "j", 4L
+        let k, kSize = Elements.pos "k", 5L
+
+        let dimNames = [i.Name; j.Name; k.Name]
+        let dimSizes = Map [i.Name, iSize; j.Name, jSize; k.Name, kSize]    
+        let argShapes = Map ["x", [iSize; jSize]; "y", [jSize; jSize]; "z", [kSize]]
+
+        let expr = Elements.arg "x" [i; j] ** 2.0 + 2.0 * (Elements.arg "y" [j; j] * (Elements.arg "z" [k])**3.0)
+        let func = Elements.func "f" dimNames dimSizes argShapes expr
+
+        randomDerivCheck 10 func
+
 

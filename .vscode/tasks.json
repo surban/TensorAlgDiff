@@ -14,6 +14,12 @@
             "problemMatcher": "$msCompile"
         },
         {
+            "taskName": "tests",
+            "command": "dotnet test -v:n",
+            "type": "shell",
+            "problemMatcher": "$msCompile"
+        },        
+        {
             "taskName": "test1",
             "command": "dotnet run -- test1",
             "type": "shell",
