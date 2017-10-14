@@ -67,15 +67,16 @@ type ElementsTests (output: ITestOutputHelper) =
             printfn "Derivative w.r.t. %s: %A" v dFn
             let aJac = DerivCheck.jacobianOfDerivFunc argEnv dInArg dFn
             let nJac = DerivCheck.numDerivOfFunc argEnv fn v
-            if not (Tensor.almostEqual nJac aJac) then
+            if not (Tensor.almostEqualWithTol (nJac, aJac, 1e-5, 1e-5)) then
                 printfn "Analytic Jacobian:\n%A" aJac
                 printfn "Numeric Jacobian:\n%A" nJac
                 printfn "Jacobian mismatch!!"
                 failwith "Jacobian mismatch in function derivative check"
             else
-                printfn "Analytic Jacobian:\n%A" aJac
-                printfn "Numeric Jacobian:\n%A" nJac            
-                printfn "Analytic and numeric Jacobians match."
+                //printfn "Analytic Jacobian:\n%A" aJac
+                //printfn "Numeric Jacobian:\n%A" nJac            
+                //printfn "Analytic and numeric Jacobians match."
+                ()
 
     let randomDerivCheck iters (fn: Elements.ElemFunc) =
         let rnd = System.Random 123
@@ -91,7 +92,6 @@ type ElementsTests (output: ITestOutputHelper) =
         let i, iSize = Elements.pos "i", 3L
         let j, jSize = Elements.pos "j", 4L
         let k, kSize = Elements.pos "k", 5L
-
 
         let xv = HostTensor.zeros [iSize; jSize] + 1.0
         let yv = HostTensor.zeros [jSize; jSize] + 2.0
@@ -181,3 +181,21 @@ type ElementsTests (output: ITestOutputHelper) =
         randomDerivCheck 10 func
 
 
+    [<Fact>]
+    let ``DerivCheck3`` () =
+        let r, rSize = Elements.pos "r", 2L
+        let s, sSize = Elements.pos "s", 3L
+        let n, nSize = Elements.pos "n", 4L
+
+        let dimNames = [r.Name; s.Name; n.Name]
+        let dimSizes = Map [r.Name, rSize; s.Name, sSize; n.Name, nSize]    
+        let argShapes = Map ["Sigma", [sSize; nSize; nSize]; "mu", [sSize; nSize]; "V", [rSize; nSize]]
+
+        let Sigma = Elements.arg "Sigma"
+        let mu = Elements.arg "mu"
+        let V = Elements.arg "V"
+        let expr = 
+            sqrt (1. / (1. + 2. * Sigma[s;n;n]**2.)) * exp (- (mu[s;n] - V[r;n])**2. / (1. + 2. * Sigma[s;n;n]))
+        let func = Elements.func "S" dimNames dimSizes argShapes expr
+
+        randomDerivCheck 10 func
