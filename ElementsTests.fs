@@ -137,6 +137,29 @@ type ElementsTests (output: ITestOutputHelper) =
         for KeyValue(_, dFn) in dFns do
             printfn "%A" dFn
 
+    [<Fact>]
+    let ``DerivTest2`` () =
+        let i, iSize = Elements.pos "i", 3L
+        let j, jSize = Elements.pos "j", 4L
+        let k, kSize = Elements.pos "k", 5L
+
+        let xv = HostTensor.zeros [iSize; jSize] + 1.0
+        let yv = HostTensor.zeros [jSize; jSize] + 2.0
+        let zv = HostTensor.zeros [kSize] + 3.0
+
+        let dimNames = [i.Name; j.Name; k.Name]
+        let dimSizes = Map [i.Name, iSize; j.Name, jSize; k.Name, kSize]    
+        let argShapes = Map ["x", xv.Shape]
+
+        let expr = Elements.arg "x" [Rat 2*i; j]
+        let func = Elements.func "f" dimNames dimSizes argShapes expr
+
+        printfn "%A" func
+        printfn "Ranges: %A" dimSizes    
+        let dFns = Elements.derivFunc func
+        printfn "dFns:" 
+        for KeyValue(_, dFn) in dFns do
+            printfn "%A" dFn
 
     [<Fact>]
     let ``DerivCheck1`` () =

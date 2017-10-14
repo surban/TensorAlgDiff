@@ -131,6 +131,7 @@ module Elements =
     and IdxComparison =
         | EqualToZero
         | GreaterOrEqualToZero
+        | Integer
 
     /// an element expression
     and [<StructuredFormatDisplay("{Pretty}")>]
@@ -141,11 +142,11 @@ module Elements =
 
     and [<StructuredFormatDisplay("{Pretty}")>]
         ElemFunc = {
-            Name:       string
-            DimNames:    string list
-            DimSize:    Map<string, int64>
-            Expr:       ElemExpr
-            ArgShapes:   Map<string, int64 list>
+            Name:           string
+            DimNames:       string list
+            DimSize:        Map<string, int64>
+            Expr:           ElemExpr
+            ArgShapes:      Map<string, int64 list>
         } with
             member this.Pretty =
                 let dims = this.DimNames |> String.concat "; "
@@ -210,8 +211,8 @@ module Elements =
         static member (*) (a: float, b: ElemExpr) = (scalar a) * b 
         static member (/) (a: float, b: ElemExpr) = (scalar a) / b 
         static member (%) (a: float, b: ElemExpr) = (scalar a) % b 
-        static member Pow (a: float, b: ElemExpr) = (scalar a) ** b   
-        static member ( *** ) (a: float, b: ElemExpr) = (scalar a) ** b          
+        static member Pow (a: float, b: ElemExpr) = (scalar a) ** b 
+        static member ( *** ) (a: float, b: ElemExpr) = (scalar a) ** b 
 
         member private this.PrettyAndPriority = 
             match this with
@@ -281,6 +282,7 @@ module Elements =
                         match cmp with
                         | GreaterOrEqualToZero -> ">= 0"
                         | EqualToZero -> "= 0"
+                        | Integer -> "is int"
                     sprintf "if {%A %s} then (%s) else (%s)" idx cmpStr aStr bStr, 0
 
         member this.Pretty = this.PrettyAndPriority |> fst
@@ -379,6 +381,8 @@ module Elements =
                 | EqualToZero -> subEval b
                 | GreaterOrEqualToZero when idxVal >= Rat.Zero -> subEval a
                 | GreaterOrEqualToZero -> subEval b
+                | Integer when Rat.isInteger idxVal -> subEval a
+                | Integer -> subEval b
 
     /// Evaluates the given function.
     let evalFunc argEnv (func: ElemFunc) =
@@ -527,17 +531,27 @@ module Elements =
                     substIdx subs summand 
             let dxSummed = buildSum dx sumConstr []
 
+            // Check that all y are integer.
+            // Check is only required for y that contain non-integer coefficients.
+            let intIdxs =
+                xToY
+                |> HostTensor.toList2D
+                |> List.filter (List.exists (Rat.isInteger >> not))
+                |> List.map (IdxExpr.ofSeq dxIdxNames1)
+            let dxIntChecked =
+                (dxSummed, intIdxs) ||> List.fold (fun s intIdx -> idxIf intIdx Integer s (scalar 0.0))
+
             // Check solvability.
             let solIdxs = 
                 xSolvability 
                 |> Tensor.convert<Rat> 
                 |> HostTensor.toList2D
                 |> List.map (fun sFacs -> IdxExpr.ofSeq dxIdxNames1 sFacs)
-            let dxChecked = 
-                (dxSummed, solIdxs) ||> List.fold (fun s solIdx -> idxIf solIdx EqualToZero s (scalar 0.0))
+            let dxSolChecked = 
+                (dxIntChecked, solIdxs) ||> List.fold (fun s solIdx -> idxIf solIdx EqualToZero s (scalar 0.0))
 
             // Build derivative function.
-            func dxName dxIdxNames dxIdxSizes argShapes dxChecked
+            func dxName dxIdxNames dxIdxSizes argShapes dxSolChecked
 
         // Perform index substitution on the derivatives of all arguments and sum by argument.
         let dxFns = 
