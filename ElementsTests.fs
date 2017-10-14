@@ -67,7 +67,7 @@ type ElementsTests (output: ITestOutputHelper) =
             printfn "Derivative w.r.t. %s: %A" v dFn
             let aJac = DerivCheck.jacobianOfDerivFunc argEnv dInArg dFn
             let nJac = DerivCheck.numDerivOfFunc argEnv fn v
-            if not (Tensor.almostEqualWithTol (nJac, aJac, 1e-5, 1e-5)) then
+            if not (Tensor.almostEqualWithTol (nJac, aJac, 1e-3, 1e-3)) then
                 printfn "Analytic Jacobian:\n%A" aJac
                 printfn "Numeric Jacobian:\n%A" nJac
                 printfn "Jacobian mismatch!!"
@@ -194,8 +194,29 @@ type ElementsTests (output: ITestOutputHelper) =
         let Sigma = Elements.arg "Sigma"
         let mu = Elements.arg "mu"
         let V = Elements.arg "V"
-        let expr = 
+        let expr =  // added **2 to Sigma to make it positive
             sqrt (1. / (1. + 2. * Sigma[s;n;n]**2.)) * exp (- (mu[s;n] - V[r;n])**2. / (1. + 2. * Sigma[s;n;n]))
         let func = Elements.func "S" dimNames dimSizes argShapes expr
 
         randomDerivCheck 10 func
+
+    [<Fact>]
+    let ``DerivCheck4`` () =
+        let r, rSize = Elements.pos "r", 2L
+        let s, sSize = Elements.pos "s", 3L
+        let t, sSize = Elements.pos "s", 2L        // =r
+        let n, nSize = Elements.pos "n", 4L
+
+        let dimNames = [r.Name; s.Name; n.Name]
+        let dimSizes = Map [r.Name, rSize; s.Name, sSize; n.Name, nSize]    
+        let argShapes = Map ["Sigma", [sSize; nSize; nSize]; "mu", [sSize; nSize]; "V", [rSize; nSize]]
+
+        let Sigma = Elements.arg "Sigma"
+        let mu = Elements.arg "mu"
+        let V = Elements.arg "V"
+        let expr =  // added **2 to Sigma to make it positive
+            sqrt (1. / (1. + 4. * Sigma[s;n;n]**2.)) * exp (- 2. * (mu[s;n] - (V[r;n] + V[t;n])/2.)**2. / (1. + 4. * Sigma[s;n;n]) - 
+                (V[r;n] - V[t;n])**2. / 2.)
+        let func = Elements.func "S" dimNames dimSizes argShapes expr
+
+        randomDerivCheck 10 func        
