@@ -117,6 +117,7 @@ module Elements =
         | Exp                           
         | Tanh
         | Sqrt
+        | SimpleSum of idx:string * low:int64 * high:int64
         | Sum of idx:string * lows:IdxExpr list * highs:IdxExpr list
 
     and BinaryOp = 
@@ -154,7 +155,7 @@ module Elements =
             member this.Shape = 
                 this.DimNames |> List.map (fun d -> this.DimSize.[d])
 
-    /// Returns all arguments occuring in the given expression/
+    /// Returns all arguments occuring in the given expression.
     let rec extractArgs expr =
         match expr with
         | Leaf (Argument (name, idxs)) -> Set [name, idxs]
@@ -253,6 +254,8 @@ module Elements =
                             | [high] -> sprintf "(%A)" high
                             | _ -> sprintf "(min %A)" highs
                         sprintf "sum{%s}_%s^%s (%s)" sym lowsStr highsStr aStr
+                    | SimpleSum (sym, low, high) ->
+                        sprintf "sum{%s}_%A^%A (%s)" sym low high aStr
                 myStr, myPri
                 
             | Binary(op, a, b) -> 
@@ -313,6 +316,9 @@ module Elements =
     let sum idx lows highs a =
         Unary (Sum (idx, lows, highs), a)
 
+    let simpleSum idx low high a =
+        Unary (SimpleSum (idx, low, high), a)
+
     /// Expression conditioned on index values.
     let idxIf idx cmp thenExpr elseExpr =
         match cmp, idx with
@@ -365,6 +371,10 @@ module Elements =
                 seq {low .. high}
                 |> Seq.map (fun v -> evalExpr argEnv (idxEnv |> Map.add sym v) a)
                 |> Seq.sum
+            | SimpleSum (sym, low, high) ->
+                seq {low .. high}
+                |> Seq.map (fun v -> evalExpr argEnv (idxEnv |> Map.add sym (Rat v)) a)
+                |> Seq.sum                
 
         | Binary (op, a, b) ->
             match op with
@@ -392,37 +402,34 @@ module Elements =
                 List.zip pos func.DimNames
                 |> List.fold (fun env (p, name) -> env |> Map.add name (Rat p)) Map.empty
             fv.[pos] <- evalExpr argEnv idxEnv func.Expr
-        fv
+        fv    
 
     /// Calculates the derivative expression given the incoming derivative dExpr.
-    let rec derivExpr expr dExpr = 
+    let rec derivExpr symRngs expr dExpr = 
         let d = dExpr        
-        let rds = derivExpr
+        let rds = derivExpr symRngs
         match expr with
         | Leaf op ->
             match op with
-            | Const v -> Map.empty
-            | IdxValue idx -> Map.empty
-            | Argument (name, idxs) -> Map [(name, idxs), d]
+            | Const v -> []
+            | IdxValue idx -> []
+            | Argument (name, idxs) -> [(name, idxs), (symRngs, d)]
         | Unary (op, a) ->
             match op with
             | Negate -> -d |> rds a
             | Abs -> d * sgn a |> rds a
-            | Sgn -> Map.empty
+            | Sgn -> []
             | Log -> d * (a ** -1.0) |> rds a
             | Log10 -> d |> rds (log a / log 10.0)
             | Exp -> d * exp a |> rds a
             | Tanh -> d * (1.0 - (tanh a)**2.0) |> rds a
             | Sqrt -> d * (1.0 / (2.0 * sqrtt a)) |> rds a
-            | Sum _ -> failwith "sum derivative not implemented yet"
+            | Sum (sym, lows, highs) -> failwith "sum derivative not implemented yet"
+            | SimpleSum (sym, low, high) ->
+                if symRngs |> Map.containsKey sym then failwithf "sum symbol %s already in use" sym
+                derivExpr (symRngs |> Map.add sym (low,high)) a d
         | Binary (op, a, b) ->
-            let (.+) da db =
-                let aDeriv = rds a da
-                let bDeriv = rds b db
-                (aDeriv, bDeriv)
-                ||> Map.fold (fun m v vg -> match Map.tryFind v m with
-                                            | Some ovg -> m |> Map.add v (vg + ovg)
-                                            | None -> m |> Map.add v vg)                 
+            let (.+) da db = List.append (rds a da) (rds b db)
             match op with
             | Add -> d .+ d
             | Substract -> d .+ (-d)
@@ -437,11 +444,9 @@ module Elements =
     /// Calculates the derivative functions of y w.r.t. all of its arguments.
     let derivFunc (y: ElemFunc) =
         // get dimension names and add constant bias dimension
-        let yIdxNames1 = y.DimNames @ ["1"]
-        let yIdxRngs1 = (y.Shape |> List.map (fun size -> 0L, size-1L)) @ [1L, 1L]
-        let yLows1, yHighs1 = List.unzip yIdxRngs1
-        let yLows1 = yLows1 |> HostTensor.ofList |> Tensor.convert<Rat>
-        let yHighs1 = yHighs1 |> HostTensor.ofList |> Tensor.convert<Rat>            
+        let _yIdxNames1 = y.DimNames @ ["1"]
+        let _yIdxRngs1 = (y.Shape |> List.map (fun size -> 0L, size-1L)) @ [1L, 1L]          
+        let _yIdxs1 = List.zip _yIdxNames1 _yIdxRngs1 |> Map.ofList
 
         // incoming derivative dy w.r.t. function y
         let dyArgName = sprintf "d%s" y.Name
@@ -449,10 +454,16 @@ module Elements =
         let argShapes = y.ArgShapes |> Map.add dyArgName y.Shape
 
         // Calculate derivative expressions w.r.t. all indiced arguments.
-        let dxs = derivExpr y.Expr dy            
+        let dxs = derivExpr _yIdxs1 y.Expr dy            
 
         // Perform index substitution and nullspace summation on the derivatives of all arguments.
-        let processDeriv xName (IdxExprs xIdxs) dx =
+        let processDeriv xName (IdxExprs xIdxs) (yIdxs1: Map<string, int64*int64>) dx =
+            // build index range vectors
+            let yIdxNames1, yIdxRngs1 = yIdxs1 |> Map.toList |> List.unzip
+            let yLows1, yHighs1 = List.unzip yIdxRngs1
+            let yLows1 = yLows1 |> HostTensor.ofList |> Tensor.convert<Rat>
+            let yHighs1 = yHighs1 |> HostTensor.ofList |> Tensor.convert<Rat>         
+
             // name the argument and its indices
             let dxName = sprintf "d%s" xName
             let dxIdxNames = xIdxs |> List.mapi (fun i _ -> sprintf "%s_%d" dxName i)
@@ -556,8 +567,7 @@ module Elements =
         // Perform index substitution on the derivatives of all arguments and sum by argument.
         let dxFns = 
             dxs 
-            |> Map.toList 
-            |> List.map (fun ((xName, xIdxs), dx) -> xName, processDeriv xName xIdxs dx)
+            |> List.map (fun ((xName, xIdxs), (idxRngs, dx)) -> xName, processDeriv xName xIdxs idxRngs dx)
             |> List.groupBy fst
             |> List.map (fun (xName, dxs) -> 
                 xName, dxs |> List.map snd |> List.reduce (fun a {Expr=bExpr} -> {a with Expr=a.Expr + bExpr}))

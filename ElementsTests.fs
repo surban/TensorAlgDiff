@@ -162,6 +162,26 @@ type ElementsTests (output: ITestOutputHelper) =
             printfn "%A" dFn
 
     [<Fact>]
+    let ``DerivTest3`` () =
+        let i, iSize = Elements.pos "i", 3L
+        let s, sSize = Elements.pos "s", 7L
+
+        let dimNames = [i.Name]
+        let dimSizes = Map [i.Name, iSize]    
+        let argShapes = Map ["x", [iSize; 10L]]
+
+        let summand = Elements.arg "x" [i; s]
+        let expr = Elements.simpleSum "s" 0L (sSize-1L) summand        
+        let func = Elements.func "f" dimNames dimSizes argShapes expr
+
+        printfn "%A" func
+        printfn "Ranges: %A" dimSizes    
+        let dFns = Elements.derivFunc func
+        printfn "dFns:" 
+        for KeyValue(_, dFn) in dFns do
+            printfn "%A" dFn
+
+    [<Fact>]
     let ``DerivCheck1`` () =
         let i, iSize = Elements.pos "i", 3L
         let j, jSize = Elements.pos "j", 4L
@@ -227,7 +247,7 @@ type ElementsTests (output: ITestOutputHelper) =
     let ``DerivCheck4`` () =
         let r, rSize = Elements.pos "r", 2L
         let s, sSize = Elements.pos "s", 3L
-        let t, sSize = Elements.pos "s", 2L        // =r
+        let t, tSize = Elements.pos "t", 2L        // =r
         let n, nSize = Elements.pos "n", 4L
 
         let dimNames = [r.Name; s.Name; n.Name]
@@ -243,3 +263,23 @@ type ElementsTests (output: ITestOutputHelper) =
         let func = Elements.func "S" dimNames dimSizes argShapes expr
 
         randomDerivCheck 10 func        
+
+    [<Fact>]
+    let ``DerivCheck5`` () =
+        let s, sSize = Elements.pos "s", 3L
+        let t, tSize = Elements.pos "t", 2L        
+        let n, nSize = Elements.pos "n", 4L
+
+        let dimNames = [t.Name; n.Name]
+        let dimSizes = Map [t.Name, tSize; n.Name, nSize]    
+        let argShapes = Map ["x", [nSize; sSize; 3L*sSize]; "y", [tSize; nSize]]
+
+        let x, y = Elements.arg "x", Elements.arg "y"
+        //let summand = y[t;n]
+        let summand = x[n ; s; Rat 2 * s]**2. + x[n; s; Rat 0 * s]**2. - y[t; Rat 0 * s]
+        let expr = y[t;n]**2. * Elements.simpleSum "s" 0L (sSize-1L) summand    
+        //let expr = Elements.simpleSum "s" 0L (sSize-1L) summand    
+        let func = Elements.func "S" dimNames dimSizes argShapes expr
+
+        randomDerivCheck 5 func             
+
