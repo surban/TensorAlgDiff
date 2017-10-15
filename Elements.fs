@@ -52,7 +52,10 @@ module Elements =
                 let idxEnv = idxEnv |> Map.add "1" Rat.One
                 f |> Map.fold (fun s i v -> s + v * idxEnv.[i]) Rat.Zero
             static member subst (repl: Map<string, IdxExpr>) (IdxExpr f) =
-                f |> Map.fold (fun r i v -> r + v * repl.[i]) IdxExpr.zero
+                (IdxExpr.zero, f) ||> Map.fold (fun r i v -> 
+                    match repl |> Map.tryFind i with
+                    | Some iv -> r + v * iv
+                    | None -> r + IdxExpr.factor i v)
             static member constVal (IdxExpr f) =
                 match f |> Map.tryFind "1" with
                 | Some v -> v
