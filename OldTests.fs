@@ -307,7 +307,7 @@ let testElements1() =
     printfn "Ranges: %A" dimSizes
   
     // derivative expression
-    let dfExpr = Elements.derivExpr Map.empty func.Expr (Elements.arg "dIn" [])
+    let dfExpr = Elements.derivExpr Set.empty Set.empty func.Expr (Elements.arg "dIn" [])
     //printfn "df:\n%A" dfExpr
 
     // derivative functions

@@ -17,6 +17,10 @@ module Elements =
                 IdxExpr Map.empty
             static member one =
                 IdxExpr.factor "1" Rat.One
+            static member named name =
+                IdxExpr.factor name Rat.One
+            static member constant value =
+                value * IdxExpr.one
             static member factor dim value =
                 IdxExpr (Map [dim, value])
             static member (~-) (IdxExpr af) =
@@ -120,7 +124,6 @@ module Elements =
         | Exp                           
         | Tanh
         | Sqrt
-        | SimpleSum of idx:string * low:int64 * high:int64
         | Sum of idx:string * lows:IdxExpr list * highs:IdxExpr list
 
     and BinaryOp = 
@@ -257,8 +260,6 @@ module Elements =
                             | [high] -> sprintf "(%A)" high
                             | _ -> sprintf "(min %A)" highs
                         sprintf "sum{%s}_%s^%s (%s)" sym lowsStr highsStr aStr
-                    | SimpleSum (sym, low, high) ->
-                        sprintf "sum{%s}_%A^%A (%s)" sym low high aStr
                 myStr, myPri
                 
             | Binary(op, a, b) -> 
@@ -315,12 +316,16 @@ module Elements =
     /// constant index value
     let idxConst v = IdxExpr.factor "1" v
 
+    /// index value one    
+    let idxOne = idxConst Rat.One
+
     /// Summation over an index.
     let sum idx lows highs a =
         Unary (Sum (idx, lows, highs), a)
 
-    let simpleSum idx low high a =
-        Unary (SimpleSum (idx, low, high), a)
+    /// Summation over an index using constant low and high values.
+    let sumConstRng idx (low: int64) (high: int64) a =
+        sum idx [IdxExpr.constant (Rat low)] [IdxExpr.constant (Rat high)] a
 
     /// Expression conditioned on index values.
     let idxIf idx cmp thenExpr elseExpr =
@@ -355,8 +360,9 @@ module Elements =
             | IdxValue idx -> idx |> IdxExpr.eval idxEnv |> float
             | Argument (name, idxs) -> 
                 let idxs = idxs |> IdxExprs.eval idxEnv |> List.map int64
-                let arg = argEnv.[name]
-                arg.[idxs]
+                match argEnv |> Map.tryFind name with
+                | Some arg -> arg.[idxs]
+                | None -> failwithf "argument %s not present in argument environment" name
 
         | Unary (op, a) ->
             match op with
@@ -374,10 +380,6 @@ module Elements =
                 seq {low .. high}
                 |> Seq.map (fun v -> evalExpr argEnv (idxEnv |> Map.add sym v) a)
                 |> Seq.sum
-            | SimpleSum (sym, low, high) ->
-                seq {low .. high}
-                |> Seq.map (fun v -> evalExpr argEnv (idxEnv |> Map.add sym (Rat v)) a)
-                |> Seq.sum                
 
         | Binary (op, a, b) ->
             match op with
@@ -408,15 +410,16 @@ module Elements =
         fv    
 
     /// Calculates the derivative expression given the incoming derivative dExpr.
-    let rec derivExpr symRngs expr dExpr = 
+    let rec derivExpr syms constrs expr dExpr = 
+        // constrs >= 0
         let d = dExpr        
-        let rds = derivExpr symRngs
+        let rds = derivExpr syms constrs
         match expr with
         | Leaf op ->
             match op with
             | Const v -> []
             | IdxValue idx -> []
-            | Argument (name, idxs) -> [(name, idxs), (symRngs, d)]
+            | Argument (name, idxs) -> [(name, idxs), (syms, constrs, d)]
         | Unary (op, a) ->
             match op with
             | Negate -> -d |> rds a
@@ -427,10 +430,12 @@ module Elements =
             | Exp -> d * exp a |> rds a
             | Tanh -> d * (1.0 - (tanh a)**2.0) |> rds a
             | Sqrt -> d * (1.0 / (2.0 * sqrtt a)) |> rds a
-            | Sum (sym, lows, highs) -> failwith "sum derivative not implemented yet"
-            | SimpleSum (sym, low, high) ->
-                if symRngs |> Map.containsKey sym then failwithf "sum symbol %s already in use" sym
-                derivExpr (symRngs |> Map.add sym (low,high)) a d
+            | Sum (sym, lows, highs) -> 
+                // low limits:  lows <= sym  =>  sym - lows  >= 0
+                let lowConstrs = lows |> List.map (fun low -> IdxExpr.named sym - low) |> Set.ofList
+                // high limits: sym <= highs => -sym + highs >= 0
+                let highConstrs = highs |> List.map (fun high -> -IdxExpr.named sym + high) |> Set.ofList
+                derivExpr (syms |> Set.add sym) (Set.unionMany [constrs; lowConstrs; highConstrs]) a d
         | Binary (op, a, b) ->
             let (.+) da db = List.append (rds a da) (rds b db)
             match op with
@@ -447,25 +452,31 @@ module Elements =
     /// Calculates the derivative functions of y w.r.t. all of its arguments.
     let derivFunc (y: ElemFunc) =
         // get dimension names and add constant bias dimension
-        let _yIdxNames1 = y.DimNames @ ["1"]
-        let _yIdxRngs1 = (y.Shape |> List.map (fun size -> 0L, size-1L)) @ [1L, 1L]          
-        let _yIdxs1 = List.zip _yIdxNames1 _yIdxRngs1 |> Map.ofList
+        let ySyms = y.DimNames @ ["1"] |> Set.ofList
 
         // incoming derivative dy w.r.t. function y
         let dyArgName = sprintf "d%s" y.Name
         let dy = arg dyArgName (y.DimNames |> List.map (fun d -> IdxExpr.factor d Rat.One))
         let argShapes = y.ArgShapes |> Map.add dyArgName y.Shape
 
+        // Build constraints from ranges of y.
+        // low limit: y_i >= 0
+        let rngLowConstrs = y.DimNames |> List.map (fun name -> IdxExpr.named name) |> Set.ofList
+        // low limit: y_i <= size_i-1 => -y_i + size_i - 1 >= 0
+        let rngHighConstrs = 
+            y.DimSize 
+            |> Map.toSeq 
+            |> Seq.map (fun (name, size) -> -IdxExpr.named name + IdxExpr.constant (Rat (size-1L)))
+            |> Set.ofSeq
+        let rngConstrs = Set.union rngLowConstrs rngHighConstrs         
+
         // Calculate derivative expressions w.r.t. all indiced arguments.
-        let dxs = derivExpr _yIdxs1 y.Expr dy            
+        let dxs = derivExpr ySyms rngConstrs y.Expr dy            
 
         // Perform index substitution and nullspace summation on the derivatives of all arguments.
-        let processDeriv xName (IdxExprs xIdxs) (yIdxs1: Map<string, int64*int64>) dx =
-            // build index range vectors
-            let yIdxNames1, yIdxRngs1 = yIdxs1 |> Map.toList |> List.unzip
-            let yLows1, yHighs1 = List.unzip yIdxRngs1
-            let yLows1 = yLows1 |> HostTensor.ofList |> Tensor.convert<Rat>
-            let yHighs1 = yHighs1 |> HostTensor.ofList |> Tensor.convert<Rat>         
+        let processDeriv xName (IdxExprs xIdxs) (ySyms: Set<string>) (yConstrs: Set<IdxExpr>) dx = //(yIdxs1: Map<string, int64*int64>) dx =
+            // get names of used indices
+            let yIdxNames1 = Set.toList ySyms
 
             // name the argument and its indices
             let dxName = sprintf "d%s" xName
@@ -478,29 +489,32 @@ module Elements =
             // Construct matrix mapping from function indices to argument indices yToX[xDim, yDim].            
             let yToX = IdxExprs.toMatrix yIdxNames1 (IdxExprs dxIdxs1) |> Tensor.convert<bigint>
 
-            // Compute the generalized inverse of it and the summation range constraints:
-            // y_i = XToY_i* .* x + Nullspace_i* .* z >= low_i
-            // y_i = XToY_i* .* x + Nullspace_i* .* z <= high_i
-            // Thus: Nullspace_i* .* z >=  low_i  - XToY_i* .* x
-            //      -Nullspace_i* .* z >= -high_i + XToY_i* .* x
+            // Compute the generalized inverse of it:
+            // y = XToY .* x + Nullspace .* z           
             let xToY, xSolvability, yNull = LinAlg.integerInverse yToX
-            let sumConstr = 
-                Tensor.concat 0 [yNull; -yNull] 
-                |> Tensor.convert<Rat>
-                |> FourierMotzkin.solve
+
+            // Build constraint matrix C from constraints specified as index expressions.
+            // Constraints are specified as: C .* y >= 0 
+            // This translates to:
+            // C .* XToY .* x + C .* Nullspace .* z >= 0
+            //                  C .* Nullspace .* z >= - C .* XToY .* x
+            let yConstrs = yConstrs |> Set.toList |> IdxExprs
+            let C = IdxExprs.toMatrix yIdxNames1 yConstrs
+
+            // Compute the summation range constraints.
+            let CNull = C .* Tensor.convert<Rat> yNull
+            let sumConstr = FourierMotzkin.solve CNull
 
             // Perform summation over nullspace.
             let rec buildSum summand sols sumSyms =
                 match sols with
                 | FourierMotzkin.Feasibility fs :: rSols ->
                     let summand = buildSum summand rSols sumSyms
-                    // System is feasible if fs .* b <= 0,
-                    // where b = [yLows - XToY .* x; -yHighs + XToY .* y].
-                    let bVec = fs .* Tensor.concat 0 [yLows1; -yHighs1] |> HostTensor.toList
-                    let bMat = fs .* Tensor.concat 0 [-xToY; xToY] |> HostTensor.toList2D
+                    // System is feasible if fs .* b <= 0, where b = - C .* XToY .* x
+                    let fsMat = -fs .* C .* xToY |> HostTensor.toList2D
                     let fsIdxs = 
-                        List.zip bVec bMat
-                        |> List.map (fun (c, bFacs) -> c * IdxExpr.one + IdxExpr.ofSeq dxIdxNames1 bFacs)
+                        fsMat
+                        |> List.map (fun bFacs -> IdxExpr.ofSeq dxIdxNames1 bFacs)
                         |> List.filter (fun ie ->
                             // Filter inequalaties that are always true.
                             // Each inequality of the form cv + iv * "i" <= 0 is considered.
@@ -516,22 +530,18 @@ module Elements =
                     let sumSym = sprintf "%s_z%d" dxName rng.Idx
                     let summand = buildSum summand rSols (sumSym::sumSyms)
                     // The limits are given by 
-                    // Low limits:  x[Idx] >= BLow  .* b - SLow  .* x.[Idx+1L..]
-                    // High limits: x[Idx] <= BHigh .* b - SHigh .* x.[Idx+1L..]
-                    // where b = [yLows - XToY .* x; -yHighs + XToY .* y].              
-                    let bVec = Tensor.concat 0 [yLows1; -yHighs1]
-                    let bMat = Tensor.concat 0 [-xToY; xToY]
-                    let bLowVec = rng.BLow .* bVec |> HostTensor.toList
-                    let bHighVec = rng.BHigh .* bVec |> HostTensor.toList
+                    // Low limits:  x[Idx] >= BLow  .* b - SLow  .* z.[Idx+1L..]
+                    // High limits: x[Idx] <= BHigh .* b - SHigh .* z.[Idx+1L..]
+                    // where b = - C .* XToY .* x
+                    let bMat = -C .* xToY 
                     let bLowMat = rng.BLow .* bMat |> HostTensor.toList2D
                     let bHighMat = rng.BHigh .* bMat |> HostTensor.toList2D
                     let sLowMat = rng.SLow |> HostTensor.toList2D
                     let sHighMat = rng.SHigh |> HostTensor.toList2D
-                    let idxExpr bVec bMat sMat = 
-                        List.zip3 bVec bMat sMat
-                        |> List.map (fun (c, bFacs, sFacs) -> 
-                            c * IdxExpr.one + IdxExpr.ofSeq dxIdxNames1 bFacs + IdxExpr.ofSeq sumSyms sFacs)
-                    let lows, highs = idxExpr bLowVec bLowMat sLowMat, idxExpr bHighVec bHighMat sHighMat
+                    let idxExpr bMat sMat = 
+                        List.zip bMat sMat
+                        |> List.map (fun (bFacs, sFacs) -> IdxExpr.ofSeq dxIdxNames1 bFacs + IdxExpr.ofSeq sumSyms sFacs)
+                    let lows, highs = idxExpr bLowMat sLowMat, idxExpr bHighMat sHighMat
                     sum sumSym lows highs summand
                 | [] -> 
                     let xToY = xToY |> HostTensor.toList2D
@@ -543,6 +553,7 @@ module Elements =
                         |> Map.ofList
                         |> Map.add "1" IdxExpr.one
                     substIdx subs summand 
+
             let dxSummed = buildSum dx sumConstr []
 
             // Check that all y are integer.
@@ -570,7 +581,7 @@ module Elements =
         // Perform index substitution on the derivatives of all arguments and sum by argument.
         let dxFns = 
             dxs 
-            |> List.map (fun ((xName, xIdxs), (idxRngs, dx)) -> xName, processDeriv xName xIdxs idxRngs dx)
+            |> List.map (fun ((xName, xIdxs), (syms, constrs, dx)) -> xName, processDeriv xName xIdxs syms constrs dx)
             |> List.groupBy fst
             |> List.map (fun (xName, dxs) -> 
                 xName, dxs |> List.map snd |> List.reduce (fun a {Expr=bExpr} -> {a with Expr=a.Expr + bExpr}))

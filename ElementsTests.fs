@@ -53,39 +53,47 @@ module DerivCheck =
         jac
 
 
-
-
 type ElementsTests (output: ITestOutputHelper) =
 
     let printfn format = Printf.kprintf (fun msg -> output.WriteLine(msg)) format 
 
-    let checkFuncDerivs argEnv fn =
-        let dFns = Elements.derivFunc fn
-        let dInArg = "d" + fn.Name
-        printfn "Checking derivative of: %A" fn
-        for KeyValue(v, dFn) in dFns do
-            printfn "Derivative w.r.t. %s: %A" v dFn
-            let aJac = DerivCheck.jacobianOfDerivFunc argEnv dInArg dFn
-            let nJac = DerivCheck.numDerivOfFunc argEnv fn v
-            if not (Tensor.almostEqualWithTol (nJac, aJac, 1e-3, 1e-3)) then
-                printfn "Analytic Jacobian:\n%A" aJac
-                printfn "Numeric Jacobian:\n%A" nJac
-                printfn "Jacobian mismatch!!"
-                failwith "Jacobian mismatch in function derivative check"
-            else
-                //printfn "Analytic Jacobian:\n%A" aJac
-                //printfn "Numeric Jacobian:\n%A" nJac            
-                //printfn "Analytic and numeric Jacobians match."
-                ()
+    let checkFuncDerivs orders argEnv fn =       
+        let rec doCheck order fn = 
+            let dFns = Elements.derivFunc fn
+            let dInArg = "d" + fn.Name
+            printfn "Checking %d. derivative of: %A" order fn
+            for KeyValue(v, dFn) in dFns do
+                printfn "%d. derivative of %s w.r.t. %s: %A" order fn.Name v dFn
+                let aJac = DerivCheck.jacobianOfDerivFunc argEnv dInArg dFn
+                let nJac = DerivCheck.numDerivOfFunc argEnv fn v
+                if not (Tensor.almostEqualWithTol (nJac, aJac, 1e-3, 1e-3)) then
+                    printfn "Analytic Jacobian:\n%A" aJac
+                    printfn "Numeric Jacobian:\n%A" nJac
+                    printfn "Jacobian mismatch!!"
+                    failwith "Jacobian mismatch in function derivative check"
+                else
+                    //printfn "Analytic Jacobian:\n%A" aJac
+                    //printfn "Numeric Jacobian:\n%A" nJac            
+                    //printfn "Analytic and numeric Jacobians match."
+                    ()
 
-    let randomDerivCheck iters (fn: Elements.ElemFunc) =
+                if order < orders then
+                    doCheck (order+1) dFn
+        doCheck 1 fn
+
+    let randomDerivCheck orders iters (fn: Elements.ElemFunc) =
         let rnd = System.Random 123
-        for i in 1 .. iters do
-            let argEnv =
-                fn.ArgShapes
-                |> Map.map (fun _ shp -> 
-                    rnd.SeqDouble() |> Seq.map (fun r -> 2. * r - 1.) |> HostTensor.ofSeqWithShape shp)
-            checkFuncDerivs argEnv fn            
+        let rndTensor shp = rnd.SeqDouble() |> Seq.map (fun r -> 2. * r - 1.) |> HostTensor.ofSeqWithShape shp
+        for i in 1 .. iters do            
+            let argEnv = 
+                seq {                 
+                    if orders=2 then yield "d" + fn.Name, rndTensor fn.Shape
+                    for KeyValue(name, shp) in fn.ArgShapes do
+                        yield name, rndTensor shp
+                        if orders=2 then yield "d" + name, rndTensor shp
+                        if orders=2 then yield "dd" + name, rndTensor shp
+                } |> Map.ofSeq
+            checkFuncDerivs orders argEnv fn            
 
     [<Fact>]
     let ``EvalTest1`` () =
@@ -171,7 +179,7 @@ type ElementsTests (output: ITestOutputHelper) =
         let argShapes = Map ["x", [iSize; 10L]]
 
         let summand = Elements.arg "x" [i; s]
-        let expr = Elements.simpleSum "s" 0L (sSize-1L) summand        
+        let expr = Elements.sumConstRng "s" 0L (sSize-1L) summand        
         let func = Elements.func "f" dimNames dimSizes argShapes expr
 
         printfn "%A" func
@@ -180,6 +188,24 @@ type ElementsTests (output: ITestOutputHelper) =
         printfn "dFns:" 
         for KeyValue(_, dFn) in dFns do
             printfn "%A" dFn
+
+    [<Fact>]
+    let ``DerivTest4`` () =
+        let i, iSize = Elements.pos "i", 7L
+
+        let dimNames = [i.Name]
+        let dimSizes = Map [i.Name, iSize]    
+        let argShapes = Map ["x", [10L]]
+
+        let expr = Elements.arg "x" [i + Elements.idxConst (Rat 2)]
+        let func = Elements.func "f" dimNames dimSizes argShapes expr
+
+        printfn "%A" func
+        printfn "Ranges: %A" dimSizes    
+        let dFns = Elements.derivFunc func
+        printfn "dFns:" 
+        for KeyValue(_, dFn) in dFns do
+            printfn "%A" dFn            
 
     [<Fact>]
     let ``DerivCheck1`` () =
@@ -204,7 +230,7 @@ type ElementsTests (output: ITestOutputHelper) =
         printfn "z=\n%A" zv
         let argEnv = Map ["x", xv; "y", yv; "z", zv]
         let fv = Elements.evalFunc argEnv func
-        checkFuncDerivs argEnv func
+        checkFuncDerivs 1 argEnv func
 
 
             
@@ -221,7 +247,7 @@ type ElementsTests (output: ITestOutputHelper) =
         let expr = Elements.arg "x" [i; j] ** 2.0 + 2.0 * (Elements.arg "y" [j; j] * (Elements.arg "z" [k])**3.0)
         let func = Elements.func "f" dimNames dimSizes argShapes expr
 
-        randomDerivCheck 10 func
+        randomDerivCheck 2 3 func
 
 
     [<Fact>]
@@ -241,7 +267,7 @@ type ElementsTests (output: ITestOutputHelper) =
             sqrt (1. / (1. + 2. * Sigma[s;n;n]**2.)) * exp (- (mu[s;n] - V[r;n])**2. / (1. + 2. * Sigma[s;n;n]))
         let func = Elements.func "S" dimNames dimSizes argShapes expr
 
-        randomDerivCheck 10 func
+        randomDerivCheck 2 2 func
 
     [<Fact>]
     let ``DerivCheck4`` () =
@@ -250,8 +276,8 @@ type ElementsTests (output: ITestOutputHelper) =
         let t, tSize = Elements.pos "t", 2L        // =r
         let n, nSize = Elements.pos "n", 4L
 
-        let dimNames = [r.Name; s.Name; n.Name]
-        let dimSizes = Map [r.Name, rSize; s.Name, sSize; n.Name, nSize]    
+        let dimNames = [r.Name; s.Name; t.Name; n.Name]
+        let dimSizes = Map [r.Name, rSize; s.Name, sSize; t.Name, tSize; n.Name, nSize]    
         let argShapes = Map ["Sigma", [sSize; nSize; nSize]; "mu", [sSize; nSize]; "V", [rSize; nSize]]
 
         let Sigma = Elements.arg "Sigma"
@@ -262,7 +288,7 @@ type ElementsTests (output: ITestOutputHelper) =
                 (V[r;n] - V[t;n])**2. / 2.)
         let func = Elements.func "S" dimNames dimSizes argShapes expr
 
-        randomDerivCheck 10 func        
+        randomDerivCheck 1 2 func        
 
     [<Fact>]
     let ``DerivCheck5`` () =
@@ -277,9 +303,9 @@ type ElementsTests (output: ITestOutputHelper) =
         let x, y = Elements.arg "x", Elements.arg "y"
         //let summand = y[t;n]
         let summand = x[n ; s; Rat 2 * s]**2. + x[n; s; Rat 0 * s]**2. - y[t; Rat 0 * s]
-        let expr = y[t;n]**2. * Elements.simpleSum "s" 0L (sSize-1L) summand    
+        let expr = y[t;n]**2. * Elements.sumConstRng "s" 0L (sSize-1L) summand    
         //let expr = Elements.simpleSum "s" 0L (sSize-1L) summand    
         let func = Elements.func "S" dimNames dimSizes argShapes expr
 
-        randomDerivCheck 5 func             
+        randomDerivCheck 1 5 func             
 
