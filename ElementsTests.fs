@@ -309,3 +309,18 @@ type ElementsTests (output: ITestOutputHelper) =
 
         randomDerivCheck 1 5 func             
 
+    [<Fact>]
+    let ``DerivCheck6`` () =
+        let s, sSize = Elements.pos "s", 3L
+        let t, tSize = Elements.pos "t", 10L
+
+        let dimNames = [s.Name; t.Name]
+        let dimSizes = Map [s.Name, sSize; t.Name, tSize]    
+        let argShapes = Map ["x", [50L]]
+
+        let x = Elements.arg "x"
+        let expr = x[Rat 10*s+t]**2.
+        let func = Elements.func "f" dimNames dimSizes argShapes expr
+
+        randomDerivCheck 1 5 func             
+
