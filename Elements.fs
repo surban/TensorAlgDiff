@@ -344,7 +344,8 @@ module Elements =
         | Leaf (Argument (name, idxs)) -> Leaf (Argument (name, IdxExprs.subst repl idxs))
         | Leaf (op) -> Leaf (op)
         | Unary (Sum (idx, lows, highs), a) ->
-            Unary (Sum (idx, lows |> List.map (IdxExpr.subst repl), highs |> List.map (IdxExpr.subst repl)), sub a)
+            Unary (Sum (idx, lows |> List.map (IdxExpr.subst repl), highs |> List.map (IdxExpr.subst repl)), 
+                        substIdx (repl |> Map.remove idx) a)
         | Unary (op, a) -> Unary (op, sub a)
         | Binary (IdxIf (idx, cmp), a, b) -> 
             Binary (IdxIf (idx |> IdxExpr.subst repl, cmp), sub a, sub b)
