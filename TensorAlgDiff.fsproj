@@ -5,15 +5,11 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\DeepNet\Numeric\Tensor\Tensor.fsproj" />
-    <ProjectReference Include="..\PLplotNet\PLplotNet\PLplotNet.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="FourierMotzkin.fs" />
-    <Compile Include="Consumers.fs" />
     <Compile Include="Elements.fs" />
     <Compile Include="ElementsTests.fs" />
-    <Compile Include="OldTests.fs" />
-    <Compile Include="ConsumerTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
