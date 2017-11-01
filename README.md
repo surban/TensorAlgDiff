@@ -37,6 +37,7 @@ Reference
 ---------
 When using this work or the provided code please refer to the following publication.
    
+    Sebastian Urban, Patrick van der Smagt. Automatic Differentiation for Tensor Algebras. arXiv cs.SC, 2017.
 
 Note that we employ some algorithms implemented in our open-source Tensor library; their source is at https://github.com/DeepMLNet/DeepNet/blob/core2/Numeric/Tensor/LinAlg.fs.
 
