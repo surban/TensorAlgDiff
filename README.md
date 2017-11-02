@@ -1,7 +1,7 @@
 Automatic Differentiation for Tensor Algebras
 =============================================
 
-The corresponding [technical report is elemdiff.pdf](https://github.com/surban/TensorAlgDiff/raw/master/elemdiff.pdf).
+Read the corresponding [technical report for more details and examples](https://github.com/surban/TensorAlgDiff/raw/master/elemdiff.pdf).
 
 This code computes expressions for the derivatives of element-wise defined tensor-valued functions.
 It can handle arguments inside the functions that are indexed by arbitrary linear combinations of the function indices.
