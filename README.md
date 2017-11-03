@@ -10,7 +10,7 @@ An example is the matrix-valued function f(a,b,c,d), which is element-wise defin
 
     f[i; j] = exp (-sum{k}_0^4 (((a[i; k] + b[j; k]) ** 2 * c[i; i] + d[i + k] ** 3)))
 
-Deriving derivative expressions when the mapping between function indices and argument indices is not 1:1, special attention is required.
+Deriving derivative expressions when the mapping between function indices and argument indices is not 1:1 requires special attention.
 For example, for the function `f_{ij} (x) = x_i^2`, the derivative of some loss `l=l(f(x))` w.r.t. `x` is `(dx)_i = dl / dx_i = \sum_j (df)_{ij} 2 x_i`; the sum is necessary because index `j` does not appear in the indices of `f`.
 Another example is `f_i (x) = x_{ii}^2`, where `x` is a matrix; here we have `(dx)_{ij} = \kronecker_{i=j} (df)_i 2 x_{ii}`; the Kronecker delta is necessary because the derivative is zero for off-diagonal elements.
 Another indexing scheme is used by `f_{ij} (x) = exp x_{i+j}`; here the correct derivative is `(dx)_k = \sum_i (df)_{i,k-i} \exp x_k`, where the range of the sum must be chosen appropriately.
