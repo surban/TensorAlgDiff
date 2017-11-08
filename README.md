@@ -1,7 +1,7 @@
 Automatic Differentiation for Tensor Algebras
 =============================================
 
-Read the corresponding [technical report for more details and examples](https://github.com/surban/TensorAlgDiff/raw/master/elemdiff.pdf).
+Read the corresponding [technical report for more details and examples](https://arxiv.org/abs/1711.01348).
 
 This code computes expressions for the derivatives of element-wise defined tensor-valued functions.
 It can handle arguments inside the functions that are indexed by arbitrary linear combinations of the function indices.
@@ -48,7 +48,7 @@ Reference
 ---------
 When using this work or the provided code please refer to the following publication.
    
-    Sebastian Urban, Patrick van der Smagt. Automatic Differentiation for Tensor Algebras. arXiv cs.SC, Nov 2017.
+    Sebastian Urban, Patrick van der Smagt. Automatic Differentiation for Tensor Algebras. arXiv:1711.01348 [cs.SC], 2017.
 
 Note that we employ some algorithms implemented in our open-source Tensor library; their source is at https://github.com/DeepMLNet/DeepNet/blob/core2/Numeric/Tensor/LinAlg.fs.
 
