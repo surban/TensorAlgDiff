@@ -1,7 +1,7 @@
 Automatic Differentiation for Tensor Algebras
 =============================================
 
-[![Build Status](https://www.travis-ci.org/surban/TensorAlgDiff.svg?branch=master)](https://www.travis-ci.org/TensorAlgDiff/TensorAlgDiff)
+[![Build Status](https://travis-ci.org/surban/TensorAlgDiff.svg?branch=master)](https://travis-ci.org/surban/TensorAlgDiff)
 
 Read the corresponding [technical report for more details and examples](https://arxiv.org/abs/1711.01348).
 
