@@ -3,6 +3,7 @@
 module FourierMotzkin
 
 open Tensor
+open Tensor.Algorithm
 
 
 /// A range for a particular element of x in a system of inequalities.

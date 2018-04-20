@@ -1,6 +1,8 @@
 Automatic Differentiation for Tensor Algebras
 =============================================
 
+[![Build Status](https://www.travis-ci.org/surban/TensorAlgDiff.svg?branch=master)](https://www.travis-ci.org/TensorAlgDiff/TensorAlgDiff)
+
 Read the corresponding [technical report for more details and examples](https://arxiv.org/abs/1711.01348).
 
 This code computes expressions for the derivatives of element-wise defined tensor-valued functions.
@@ -32,26 +34,22 @@ This work can easily be employed in system that generate C++ or CUDA code for ex
 
 Running
 -------
+
 1. Install .NET Core 2.0 from https://www.microsoft.com/net/learn/get-started/ (packages available for all operating systems).
 We tested our code on Ubuntu Linux.
 
-2. Add the feed for our Tensor library to your NuGet configuration. 
-This can be done by adding the following line to the file `~/.nuget/NuGet.Config`
-        
-        <add key="CorePorts" value="https://www.myget.org/F/coreports/api/v3/index.json" protocolVersion="3" /> 
+2. To build and run the demo execute `dotnet run`
 
-3. To build and run the demo execute `dotnet run`
-
-4. To run the numeric verification tests run `dotnet test` (takes approx. 2 minutes)
+3. To run the numeric verification tests run `dotnet test` (takes approx. 2 minutes)
 
 Reference
 ---------
+
 When using this work or the provided code please refer to the following publication.
-   
+
     Sebastian Urban, Patrick van der Smagt. Automatic Differentiation for Tensor Algebras. arXiv:1711.01348 [cs.SC], 2017.
 
-Note that we employ some algorithms implemented in our open-source Tensor library; their source is at https://github.com/DeepMLNet/DeepNet/blob/core2/Numeric/Tensor/LinAlg.fs.
-
+Note that we employ some algorithms implemented in our open-source Tensor library; their source is at https://github.com/DeepMLNet/DeepNet/tree/master/Tensor
 
 License
 -------

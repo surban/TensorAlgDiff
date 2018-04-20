@@ -9,10 +9,10 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "build",
-            "program": "${workspaceRoot}/bin/Debug/netcoreapp2.0/lattice1.dll",
+            "program": "${workspaceRoot}/bin/Debug/netcoreapp2.0/TensorAlgDiff.dll",
             "args": [],
             "cwd": "${workspaceRoot}",
-            "stopAtEntry": false,
+            "stopAtEntry": true,
             "console": "internalConsole"
         }
     ]

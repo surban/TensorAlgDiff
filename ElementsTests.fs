@@ -5,6 +5,7 @@ open Xunit.Abstractions
 open FsUnit.Xunit
 
 open Tensor
+open Tensor.Algorithm
 
 
 module DerivCheck =
@@ -66,7 +67,7 @@ type ElementsTests (output: ITestOutputHelper) =
                 printfn "%d. derivative of %s w.r.t. %s: %A" order fn.Name v dFn
                 let nJac = DerivCheck.numDerivOfFunc argEnv fn v
                 let aJac = DerivCheck.jacobianOfDerivFunc argEnv dInArg dFn
-                if not (Tensor.almostEqualWithTol (nJac, aJac, 1e-3, 1e-3)) then
+                if not (Tensor.almostEqual (nJac, aJac, 1e-3, 1e-3)) then
                     printfn "Analytic Jacobian:\n%A" aJac
                     printfn "Numeric Jacobian:\n%A" nJac
                     printfn "Jacobian mismatch!!"
@@ -83,7 +84,7 @@ type ElementsTests (output: ITestOutputHelper) =
 
     let randomDerivCheck orders iters (fn: Elements.ElemFunc) =
         let rnd = System.Random 123
-        let rndTensor shp = rnd.SeqDouble() |> Seq.map (fun r -> 2. * r - 1.) |> HostTensor.ofSeqWithShape shp
+        let rndTensor shp = HostTensor.randomUniform rnd (-1., 1.) shp
         for i in 1 .. iters do            
             let argEnv = 
                 seq {                 
@@ -214,9 +215,9 @@ type ElementsTests (output: ITestOutputHelper) =
         let k, kSize = Elements.pos "k", 5L
 
         let rnd = System.Random 123
-        let xv = rnd.SeqDouble() |> HostTensor.ofSeqWithShape [iSize; jSize]
-        let yv = rnd.SeqDouble() |> HostTensor.ofSeqWithShape [jSize; jSize] 
-        let zv = rnd.SeqDouble() |> HostTensor.ofSeqWithShape [kSize] 
+        let xv = HostTensor.randomUniform rnd (0., 1.) [iSize; jSize]
+        let yv = HostTensor.randomUniform rnd (0., 1.) [jSize; jSize] 
+        let zv = HostTensor.randomUniform rnd (0., 1.) [kSize] 
 
         let dimNames = [i.Name; j.Name; k.Name]
         let dimSizes = Map [i.Name, iSize; j.Name, jSize; k.Name, kSize]    

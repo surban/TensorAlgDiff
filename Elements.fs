@@ -2,7 +2,7 @@ namespace Elements
 
 open System
 open Tensor
-open Tensor.Algorithms
+open Tensor.Algorithm
 
 
 /// element expression
@@ -403,7 +403,7 @@ module Elements =
     /// Evaluates the given function.
     let evalFunc argEnv (func: ElemFunc) =
         let fv = HostTensor.zeros func.Shape
-        for pos in TensorLayout.allIdxOfShape func.Shape do
+        for pos in Tensor.Backend.TensorLayout.allIdxOfShape func.Shape do
             let idxEnv =
                 List.zip pos func.DimNames
                 |> List.fold (fun env (p, name) -> env |> Map.add name (Rat p)) Map.empty
@@ -488,7 +488,7 @@ module Elements =
             let dxIdxs1, dxIdxNames1 = xIdxs @ [IdxExpr.one], dxIdxNames @ ["1"]
 
             // Construct matrix mapping from function indices to argument indices yToX[xDim, yDim].            
-            let yToX = IdxExprs.toMatrix yIdxNames1 (IdxExprs dxIdxs1) |> Tensor.convert<bigint>
+            let yToX = IdxExprs.toMatrix yIdxNames1 (IdxExprs dxIdxs1) |> Tensor<bigint>.convert
 
             // Compute the generalized inverse of it:
             // y = XToY .* x + Nullspace .* z           
@@ -503,7 +503,7 @@ module Elements =
             let C = IdxExprs.toMatrix yIdxNames1 yConstrs
 
             // Compute the summation range constraints.
-            let CNull = C .* Tensor.convert<Rat> yNull
+            let CNull = C .* Tensor<Rat>.convert yNull
             let sumConstr = FourierMotzkin.solve CNull
 
             // Perform summation over nullspace.
@@ -546,7 +546,7 @@ module Elements =
                     sum sumSym lows highs summand
                 | [] -> 
                     let xToY = xToY |> HostTensor.toList2D
-                    let zToY = yNull |> Tensor.convert<Rat> |> HostTensor.toList2D
+                    let zToY = yNull |> Tensor<Rat>.convert |> HostTensor.toList2D
                     let subs =
                         List.zip3 yIdxNames1 xToY zToY
                         |> List.map (fun (name, argFacs, nsFacs) -> 
@@ -570,7 +570,7 @@ module Elements =
             // Check solvability.
             let solIdxs = 
                 xSolvability 
-                |> Tensor.convert<Rat> 
+                |> Tensor<Rat>.convert
                 |> HostTensor.toList2D
                 |> List.map (fun sFacs -> IdxExpr.ofSeq dxIdxNames1 sFacs)
             let dxSolChecked = 

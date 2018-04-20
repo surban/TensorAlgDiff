@@ -4,7 +4,7 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "taskName": "build",
+            "label": "build",
             "command": "dotnet build",
             "type": "shell",
             "group": "build",
@@ -14,70 +14,10 @@
             "problemMatcher": "$msCompile"
         },
         {
-            "taskName": "tests",
+            "label": "tests",
             "command": "dotnet test -v:n",
             "type": "shell",
             "problemMatcher": "$msCompile"
-        },        
-        {
-            "taskName": "test1",
-            "command": "dotnet run -- test1",
-            "type": "shell",
-            "problemMatcher": "$msCompile"
-        },
-        {
-            "taskName": "test2",
-            "command": "dotnet run -- test2",
-            "type": "shell",
-            "problemMatcher": "$msCompile"
-        },
-        {
-            "taskName": "test3",
-            "command": "dotnet run -- test3",
-            "type": "shell",
-            "problemMatcher": "$msCompile"
-        },
-        {
-            "taskName": "test4",
-            "command": "dotnet run -- test4",
-            "type": "shell",
-            "problemMatcher": "$msCompile"
-        },
-        {
-            "taskName": "testRectTransform",
-            "command": "dotnet run -- testRectTransform",
-            "type": "shell",
-            "problemMatcher": "$msCompile"
-        },
-        {
-            "taskName": "testConsumers",
-            "command": "dotnet run -- testConsumers",
-            "type": "shell",
-            "problemMatcher": "$msCompile"
-        },
-        {
-            "taskName": "testConsumers2",
-            "command": "dotnet run -- testConsumers2",
-            "type": "shell",
-            "problemMatcher": ["$msCompile", "$eslint-stylish"]
-        },        
-        {
-            "taskName": "testInequal",
-            "command": "dotnet run -- testInequal",
-            "type": "shell",
-            "problemMatcher": "$msCompile"
-        },
-        {
-            "taskName": "testInequal2",
-            "command": "dotnet run -- testInequal2",
-            "type": "shell",
-            "problemMatcher": "$msCompile"
-        },        
-        {
-            "taskName": "testElements1",
-            "command": "dotnet run -- testElements1",
-            "type": "shell",
-            "problemMatcher": "$msCompile"
-        }                                                                
+        }
     ]
 }

@@ -10,7 +10,8 @@
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Tensor" Version="0.4.31" />
+    <PackageReference Include="Tensor" Version="0.4.5" />
+    <PackageReference Include="Tensor.Algorithm" Version="0.4.5" />
     <PackageReference Include="FsUnit.Xunit" Version="3.0.0" />
     <PackageReference Include="xunit" Version="2.3.0-beta5-build3769" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.3.0-beta5-build3769" />
