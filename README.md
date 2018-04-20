@@ -30,13 +30,12 @@ For the above expression the algorithm outputs:
     Derivative of f wrt. d: dd[dd_0] = sum{dd_z1}_(max [0; -2 + dd_0])^(min [4; dd_0]) (sum{dd_z0}_0^3 (((-(df[dd_0 + -dd_z1; dd_z0] * exp (-sum{k}_0^4 (((a[dd_0 + -dd_z1; k] + b[dd_z0; k]) ** 2 * c[dd_0 + -dd_z1; dd_0 + -dd_z1] + d[dd_0 + -dd_z1 + k] ** 3))))) * 3 * d[dd_0] ** (3 - 1))))
 
 Internally, the derivatives are stored as computational trees to avoid repeated computations and thus expression blowup that otherwise occurs in symbolic differentiation.
-This work can easily be employed in system that generate C++ or CUDA code for expressions or be combined with a Tensor Algebra Compiler like http://tensor-compiler.org.
+This work can easily be employed in system that generate C++ or CUDA code for expressions or be combined with a Tensor Algebra Compiler like <http://tensor-compiler.org>.
 
 Running
 -------
 
-1. Install .NET Core 2.0 from https://www.microsoft.com/net/learn/get-started/ (packages available for all operating systems).
-We tested our code on Ubuntu Linux.
+1. Install .NET Core 2.0 from <https://www.microsoft.com/net/learn/get-started/> (packages available for all operating systems). We tested our code on Ubuntu Linux.
 
 2. To build and run the demo execute `dotnet run`
 
@@ -49,9 +48,10 @@ When using this work or the provided code please refer to the following publicat
 
     Sebastian Urban, Patrick van der Smagt. Automatic Differentiation for Tensor Algebras. arXiv:1711.01348 [cs.SC], 2017.
 
-Note that we employ some algorithms implemented in our open-source Tensor library; their source is at https://github.com/DeepMLNet/DeepNet/tree/master/Tensor
+Note that we employ some algorithms implemented in our open-source Tensor library; their source is at <https://github.com/DeepMLNet/DeepNet/tree/master/Tensor>.
+Documentation is available at <https://www.deepml.net/Tensor>.
 
 License
 -------
-Apache License 2.0
 
+Apache License 2.0
